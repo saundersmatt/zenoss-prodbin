@@ -3,11 +3,19 @@
     xmlns="http://namespaces.zope.org/zope"
     xmlns:five="http://namespaces.zope.org/five"
     xmlns:browser="http://namespaces.zope.org/browser"
+    xmlns:cmf="http://namespaces.zope.org/cmf"
     xmlns:meta="http://namespaces.zope.org/meta"
     >
     <include package=".extdirect.zope"/>
     <include package=".guid"/>
     <include package=".controlplane"/>
+    <include package="Products.CMFCore" file="meta.zcml"/>
+
+    <cmf:registerDirectory
+        name="js"
+        directory="js"
+        recursive="True"
+        />
 
     <browser:page
             for="*"
