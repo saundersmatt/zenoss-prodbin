@@ -38,11 +38,11 @@ log = logging.getLogger('zen.ZenTableManager')
 class TableStateNotFound(Exception): pass
 
 
-def convert(x): 
-    return 0.0 if isinstance(x, float) and math.isnan(x) else x 
+def convert(x):
+    return 0.0 if isinstance(x, float) and math.isnan(x) else x
 
-def zencmp(o1, o2): 
-    return cmp(convert(o1), convert(o2)) 
+def zencmp(o1, o2):
+    return cmp(convert(o1), convert(o2))
 
 
 def manage_addZenTableManager(context, id="", REQUEST = None):
@@ -380,15 +380,19 @@ class ZenTableManager(SimpleItem, PropertyManager):
 
     def initTableManagerSkins(self):
         """setup the skins that come with ZenTableManager"""
-        layers = ('zentablemanager','zenui')
+        layers = ('zentablemanager', 'zenui')
         try:
             import string
             from Products.CMFCore.utils import getToolByName
-            from Products.CMFCore.DirectoryView import addDirectoryViews
+            from Products.CMFCore.DirectoryView import (
+                addDirectoryViews, registerDirectory
+            )
+            registerDirectory('skins', globals())
             skinstool = getToolByName(self, 'portal_skins')
             for layer in layers:
                 if layer not in skinstool.objectIds():
                     addDirectoryViews(skinstool, 'skins', globals())
+
             skins = skinstool.getSkinSelections()
             for skin in skins:
                 path = skinstool.getSkinPath(skin)
