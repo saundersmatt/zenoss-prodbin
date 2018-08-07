@@ -2,11 +2,20 @@
     xmlns="http://namespaces.zope.org/zope"
     xmlns:five="http://namespaces.zope.org/five"
     xmlns:browser="http://namespaces.zope.org/browser"
+    xmlns:cmf="http://namespaces.zope.org/cmf"
     i18n_domain="Products.ZenEvents">
 
     <include package="Products.ZenModel" file="permissions.zcml"/>
 
     <include package=".browser"/>
+
+    <include package="Products.CMFCore" file="meta.zcml"/>
+
+    <cmf:registerDirectory
+        name="skins"
+        directory="skins"
+        recursive="True"
+        />
 
     <subscriber handler=".zeneventdEvents.onSigTerm"/>
     <subscriber handler=".zeneventdEvents.onSigUsr1"/>
