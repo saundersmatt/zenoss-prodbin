@@ -182,9 +182,16 @@ class UserSettingsManager(ZenModelRM):
         # security manager as it will have role set.
         # self.acl_users.getUser doesn't really work with Auth0 since
         # we don't call back into Auth0 to find users.
+
+        # getRolesAndPermissions = self.acl_users.manage_getUserRolesAndPermissions
         if userid and userid != user.getId():
             user = self.acl_users.getUser(userid)
-        if user: return user.__of__(self.acl_users)
+        if user:
+            retval = user.__of__(self.acl_users)
+            log.info('getUser: {}'.format(retval))
+            #log.info('getUser: permissions: {}'.format(getRolesAndPermissions(user.getId())))
+            #return user.__of__(self.acl_users)
+            return retval
 
 
     def getAllActionRules(self):
@@ -219,6 +226,7 @@ class UserSettingsManager(ZenModelRM):
                     ufolder.updatePropsFromDict(props)
                 folder.changeOwnership(user)
                 folder.manage_setLocalRoles(userid, ("Owner",))
+        log.info('got user folder {}'.format(folder))
         return folder
 
 
@@ -255,7 +263,7 @@ class UserSettingsManager(ZenModelRM):
 
     security.declareProtected(ZEN_MANAGE_DMD, 'manage_addUser')
     @validate_csrf_token
-    def manage_addUser(self, userid, password=None,roles=("ZenUser",),
+    def manage_addUser(self, userid, password=None,roles=(),
                     REQUEST=None,**kw):
         """
         Add a Zenoss user to the system and set the user's default properties.
@@ -265,6 +273,7 @@ class UserSettingsManager(ZenModelRM):
         @parameter roles: tuple of role names
         @parameter REQUEST: Zope object containing details about this request
         """
+        log.info("new user !!! userid: {} with roles: {}".format(userid, roles))
         if not userid: return
 
         userid= userid.strip()
@@ -611,7 +620,7 @@ class UserSettings(ZenModelRM):
     defaultPageSize = 40
     defaultEventPageSize = 30
     userTheme = "z-cse z-cse-dark"
-    defaultAdminRole = "ZenUser"
+    defaultAdminRole = "Authenticated"
     oncallStart = 0
     oncallEnd = 0
     escalationMinutes = 0

@@ -100,6 +100,14 @@ def get_ip(request):
 
     return ip
 
+_CALL_COUNTER_ = 0
+def yieldPermissionsOfAuthenticatedRole(pas):
+    global _CALL_COUNTER_
+    if _CALL_COUNTER_ == 0:
+        yield pas.rolesOfPermission('Manage DMD')
+        _CALL_COUNTER_ = _CALL_COUNTER_ + 1
+    else:
+        yield None
 
 # Monkey patch PAS to audit log successful and failed login attempts
 def validate(self, request, auth='', roles=_noroles):
@@ -118,13 +126,19 @@ def validate(self, request, auth='', roles=_noroles):
     Success (local, LDAP, and Active Directory)
        is_top=0, user_ids=[('username', 'username')], name=login, if self._authorizeUser(...): return user
     """
+    # perms = next(yieldPermissionsOfAuthenticatedRole(self))
+    # if perms:
+    #     log.info('Authenticated permissions \n\t\t{}'.format(perms))
     plugins = self._getOb( 'plugins' )
     is_top = self._isTop()
     user_ids = self._extractUserIds(request, plugins)
+    log.info('extracted_user_ids: {}'.format(user_ids))
     accessed, container, name, value = self._getObjectContext(request['PUBLISHED'], request)
     ipaddress = get_ip(request)
     for user_id, login in user_ids:
+        log.info('user_id: {}, login: {}'.format(user_id, login))
         user = self._findUser(plugins, user_id, login, request=request)
+        log.info('_findUser results: {} with roles: {}'.format(user, user.getRoles()))
         if aq_base(user) is emergency_user:
             if is_top:
                 return user
@@ -135,6 +149,7 @@ def validate(self, request, auth='', roles=_noroles):
             if name in ('login'):
                 audit('UI.Authentication.Valid', ipaddress=ipaddress)
                 notify(UserLoggedInEvent(self.zport.dmd.ZenUsers.getUserSettings()))
+            log.info('_authorizedUser is True: user: {} roles: {}'.format(user, user.getRoles()))
             return user
 
     if not is_top:
