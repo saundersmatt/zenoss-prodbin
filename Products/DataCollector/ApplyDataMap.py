@@ -425,7 +425,11 @@ class ApplyDataMap(object):
         """
         constructor = importClass(objmap.modname, objmap.classname)
         if hasattr(objmap, 'id'):
-            remoteObj = constructor(objmap.id)
+            try:
+                remoteObj = constructor(objmap.id)
+            except Exception as e:
+                import pdb; pdb.set_trace()
+                raise
         else:
             remoteObj = constructor(device, objmap)
         if remoteObj is None:

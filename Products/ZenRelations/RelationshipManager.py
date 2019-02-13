@@ -221,7 +221,11 @@ class RelationshipManager(PrimaryPathObjectManager, ZenPropertyManager):
         relnames = self.getRelationshipNames()
         for name, schema in self._relations:
             if name not in relnames:
-                self._setObject(name, schema.createRelation(name))
+                try:
+                    self._setObject(name, schema.createRelation(name))
+                except Exception as e:
+                    import pdb; pdb.set_trace()
+                    raise
             if name in relnames: relnames.remove(name)
         for rname in relnames:
             self._delObject(rname)

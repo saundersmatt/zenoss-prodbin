@@ -170,6 +170,8 @@ class ZingConnectorClient(object):
         return success == True
 
     def ping(self):
+        # TODO: disabling zing-connector whlie developing
+        return False
         resp_code = -1
         try:
             resp = self.session.get(self.ping_url, timeout=0.2)
