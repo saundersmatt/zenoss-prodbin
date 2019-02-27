@@ -29,7 +29,9 @@ Ext.onReady(function(){
             config = config || {};
             Ext.applyIf(config, {
                 model: 'Zenoss.sequencegrid.Model',
-                initialSortColumn: "id",
+                remoteSort: true,
+                initialSortColumn: 'sequence',
+                lockedOrder: 'asc',
                 directFn: Zenoss.remote.EventClassesRouter.getSequence,
                 root: 'data'
             });
