@@ -64,11 +64,13 @@ class ApplyDataMapTest(BaseTestCase):
 
     def test_applyDataMap_relmap(self):
         dmd = self.dmd
+
         class datamap(list):
             compname = "a/b"
             relname  = "c"
 
         class Device(object):
+            id = "testDevice"
 
             def deviceClass(self):
                 return dmd.Devices
@@ -83,7 +85,7 @@ class ApplyDataMapTest(BaseTestCase):
             def getObjByPath(self, path):
                 return reduce(getattr, path.split("/"), self)
             def getId(self):
-                return "testDevice"
+                return self.id
 
             class a:
                 class b:
@@ -93,6 +95,7 @@ class ApplyDataMapTest(BaseTestCase):
                         def objectIdsAll():
                             "returns the list of object ids in this relationship"
                             return []
+
         self.adm.applyDataMap(Device(), datamap(), datamap.relname, datamap.compname)
 
     def test_applyDataMap_relmapException(self):
