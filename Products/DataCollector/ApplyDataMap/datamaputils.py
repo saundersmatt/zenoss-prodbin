@@ -180,10 +180,17 @@ def _update_callable_attribute(attr, value):
         try:
             attr(*value) if isinstance(value, tuple) else attr(value)
         except ValueError:
-            value = (value,)
-            attr(*value)
-    except Exception:
+            '''This is to handle legacy zenpacks that use the signature pattern
+            def func(*args): (arg1, arg2, ...) = args[0]
+            '''
+            attr(*(value,))
+    except Exception as err:
         log.exception(
             'Error in _update_callable_attribute. failed to set %s.%s%s',
             attr.__module__, attr.__name__, value
         )
+        print(
+            'Error in _update_callable_attribute. failed to set %s.%s%s' %
+            (attr.__module__, attr.__name__, value)
+        )
+        print('\nException = %s\n' % err)

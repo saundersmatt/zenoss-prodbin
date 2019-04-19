@@ -1,15 +1,13 @@
 from unittest import TestCase
-from mock import Mock, create_autospec, patch, sentinel, MagicMock, call
+from mock import Mock, create_autospec, patch, sentinel, MagicMock
 
 from Products.ZenModel.Device import Device
 from ..applydatamap import (
     log,
     RelationshipMap,
     ObjectMap,
-    IncrementalDataMap, InvalidIncrementalDataMapError,
+    IncrementalDataMap,
     ZenModelRM,
-    ObjectCreationError,
-    ObjectNotFound,
 
     CLASSIFIER_CLASS,
     isSameData,
@@ -17,21 +15,15 @@ from ..applydatamap import (
 
     _get_relationship_ids,
     _validate_device_class,
-    _set_objectmap_directive,
-    _set_related_object_directive,
     _get_objmap_target,
-    _get_objmap_parent,
     _get_relmap_target,
     _get_object_by_pid,
-    _om_class_changed,
     _validate_datamap,
     _get_relationshipmap_diff,
     _process_relationshipmap,
-    _process_objectmap,
 
     _remove_relationship,
     _create_object,
-    _add_object_to_relationship,
 )
 
 log.setLevel('DEBUG')
@@ -100,10 +92,7 @@ class ApplyDataMapTests(TestCase):
         relname = 'relationship'
         relationship = Mock(name=relname, spec_set=['_getOb'])
         map_spec += ['_relname', 'id']
-        object_map = Mock(
-            ObjectMap, name='object_map',
-            _relname=relname, id='device_id'
-        )
+        object_map = ObjectMap({'id': 'device_id', '_relname': relname})
         dev_spec += ['id', 'meta_type', object_map._relname]
         device = Mock(
             name='device', spec_set=dev_spec, id=object_map.id,
@@ -197,25 +186,26 @@ class ApplyDataMapTests(TestCase):
         t.adm._report_changes.assert_called_with(relmap, device)
         t.assertEqual(ret, t.adm._report_changes.return_value)
 
-    @patch('{src}._process_objectmap'.format(**PATH), autospec=True)
+    @patch('{src}._validate_datamap'.format(**PATH), autospec=True)
     @patch('{src}.transact'.format(**PATH), autospec=True)
-    def test_applyDataMap_ObjectMap(t, transact, _process_objectmap):
+    def test_applyDataMap_ObjectMap(t, transact, _validate_datamap):
         device, objmap = t._device_and_objmap(dev_spec=['getObjByPath'])
         device.getObjByPath.return_value = device
-        _process_objectmap.return_value = objmap
         # make transact return the argument passed to it
         transact.side_effect = lambda x: x
-        t.adm._apply_objectmap = create_autospec(t.adm._apply_objectmap)
+        _apply_incrementalmap = create_autospec(t.adm._apply_incrementalmap)
+        t.adm._apply_incrementalmap = _apply_incrementalmap
+        incmap = Mock(IncrementalDataMap)
+        _validate_datamap.return_value = incmap
         t.adm._report_changes = create_autospec(t.adm._report_changes)
 
         ret = t.adm.applyDataMap(device, objmap)
 
         t.DatamapAddEvent.assert_called_with(t.adm._dmd, objmap, device)
         t.notify.assert_called_with(t.DatamapAddEvent.return_value)
-        _process_objectmap.assert_called_with(objmap, device)
-        transact.assert_called_with(t.adm._apply_objectmap)
-        t.adm._apply_objectmap.assert_called_with(objmap, device)
-        t.adm._report_changes.assert_called_with(objmap, device)
+        transact.assert_called_with(t.adm._apply_incrementalmap)
+        _apply_incrementalmap.assert_called_with(incmap, device)
+        t.adm._report_changes.assert_called_with(incmap, device)
         t.assertEqual(ret, t.adm._report_changes.return_value)
 
     @patch('{src}.transact'.format(**PATH), autospec=True)
@@ -255,20 +245,27 @@ class ApplyDataMapTests(TestCase):
         t.adm._report_changes.assert_called_with(relmap, device)
         t.assertEqual(ret, t.adm._report_changes.return_value)
 
-    @patch('{src}._process_objectmap'.format(**PATH), autospec=True)
-    def test_applyDataMap_ObjectMap_commit_false(t, _process_objectmap):
+    @patch('{src}._validate_datamap'.format(**PATH), autospec=True)
+    @patch('{src}.transact'.format(**PATH), autospec=True)
+    def test_applyDataMap_ObjectMap_commit_false(
+        t, transact, _validate_datamap
+    ):
         device, objmap = t._device_and_objmap()
-        _process_objectmap.return_value = objmap
-        t.adm._apply_objectmap = create_autospec(t.adm._apply_objectmap)
         t.adm._report_changes = create_autospec(t.adm._report_changes)
+        incmap = Mock(IncrementalDataMap)
+        _validate_datamap.return_value = incmap
 
         ret = t.adm.applyDataMap(device, objmap, commit=False)
 
+        _validate_datamap.assert_called_with(
+            device, objmap, compname='', modname='', parentId='', relname=''
+        )
         t.DatamapAddEvent.assert_called_with(t.adm._dmd, objmap, device)
         t.notify.assert_called_with(t.DatamapAddEvent.return_value)
-        _process_objectmap.assert_called_with(objmap, device)
-        t.adm._apply_objectmap.assert_called_with(objmap, device)
-        t.adm._report_changes.assert_called_with(objmap, device)
+        # not called
+        t.assertFalse(transact.call_args_list)
+        incmap.apply.assert_called_with()
+        t.adm._report_changes.assert_called_with(incmap, device)
         t.assertEqual(ret, t.adm._report_changes.return_value)
 
     def test__applyDataMap(t):
@@ -279,14 +276,12 @@ class ApplyDataMapTests(TestCase):
 
     @patch('{src}._remove_relationship'.format(**PATH), autospec=True)
     def test__apply_relationshipmap(t, _remove_relationship):
-        t.adm._apply_objectmap = create_autospec(
-            t.adm._apply_objectmap, return_value=True
+        t.adm._apply_incrementalmap = create_autospec(
+            t.adm._apply_incrementalmap, return_value=True
         )
         device, relmap = t._device_and_relmap()
-        object_map_1 = ObjectMap({'id': 'om1'})
-        object_map_2 = ObjectMap({'id': 'om2'})
         relmap._parent = sentinel.parent
-        relmap.maps = [object_map_1, object_map_2]
+        relmap.maps = [Mock(IncrementalDataMap), Mock(IncrementalDataMap)]
         relmap.__iter__.return_value = relmap.maps
         relmap._diff = {'removed': [sentinel.remove], 'locked': []}
 
@@ -295,10 +290,8 @@ class ApplyDataMapTests(TestCase):
         _remove_relationship.assert_called_with(
             relmap._parent, relmap.relname, sentinel.remove
         )
-        t.adm._apply_objectmap.assert_has_calls([
-            call(object_map_1, device),
-            call(object_map_2, device)
-        ])
+        for m in relmap.maps:
+            m.apply.assert_called_with()
 
     @patch('{src}._get_relationshipmap_diff'.format(**PATH), autospec=True)
     @patch('{src}._get_relationship_ids'.format(**PATH), autospec=True)
@@ -326,82 +319,6 @@ class ApplyDataMapTests(TestCase):
 
         device.addRelation.assert_called_with(relmap.relname, object_map)
 
-    def test__apply_objectmap_nochange(t):
-        device, objmap = t._device_and_objmap()
-        objmap._directive = 'nochange'
-
-        ret = t.adm._apply_objectmap(objmap, device)
-
-        t.assertFalse(ret)
-
-    def test__apply_objectmap_add(t):
-        t.adm._add_related_object = create_autospec(t.adm._add_related_object)
-        device = Device(id='device_id')
-        objmap = ObjectMap({'_relname': sentinel.rel, '_directive': 'add'})
-
-        ret = t.adm._apply_objectmap(objmap, device)
-
-        t.adm._add_related_object.assert_called_with(
-            device, objmap._relname, objmap
-        )
-        t.assertIs(ret, True)
-
-    def test__apply_objectmap_update(t):
-        t.adm._update = create_autospec(t.adm._update)
-        t.adm._build_directive_map()
-        device = Device(id='device_id')
-        objmap = ObjectMap(
-            {'id': device.id, '_relname': 'relate', '_directive': 'update'}
-        )
-
-        ret = t.adm._apply_objectmap(objmap, device)
-
-        t.adm._update.assert_called_with(
-            device=device, relname=objmap._relname, object_map=objmap
-        )
-        t.assertEqual(ret, t.adm._update.return_value)
-
-    @patch('{src}._remove_relationship'.format(**PATH), autospec=True)
-    def test__apply_objectmap_remove(t, _remove_relationship):
-        device, objmap = t._device_and_objmap()
-        objmap._target = device
-        objmap._directive = 'remove'
-
-        ret = t.adm._apply_objectmap(objmap, device)
-
-        _remove_relationship.assert_called_with(
-            device, objmap._relname, objmap._target
-        )
-        t.assertEqual(ret, _remove_relationship.return_value)
-
-    @patch('{src}._remove_relationship'.format(**PATH), autospec=True)
-    def test__apply_objectmap_rebuild(t, _remove_relationship):
-        t.adm._add_related_object = create_autospec(t.adm._add_related_object)
-        device, objmap = t._device_and_objmap()
-        objmap._directive = 'rebuild'
-
-        ret = t.adm._apply_objectmap(objmap, device)
-
-        _remove_relationship.assert_called_with(
-            device, objmap._relname, objmap
-        )
-        t.adm._add_related_object.assert_called_with(
-            device, objmap._relname, objmap
-        )
-        t.assertIs(ret, True)
-
-    def test__apply_objectmap_directive_update_locked(t):
-        device, objmap = t._device_and_objmap()
-        objmap._directive = 'update_locked'
-        ret = t.adm._apply_objectmap(objmap, device)
-        t.assertEqual(ret, False)
-
-    def test__apply_objectmap_directive_delete_locked(t):
-        device, objmap = t._device_and_objmap()
-        objmap._directive = 'delete_locked'
-        ret = t.adm._apply_objectmap(objmap, device)
-        t.assertEqual(ret, False)
-
     def test__apply_incrementalmap(t):
         device = sentinel.device
         imap = Mock(IncrementalDataMap)
@@ -409,73 +326,6 @@ class ApplyDataMapTests(TestCase):
         t.adm._apply_incrementalmap(imap, device)
 
         imap.apply.assert_called_with()
-
-    @patch('{src}.DatamapUpdateEvent'.format(**PATH), autospec=True)
-    def test__update(t, DatamapUpdateEvent):
-        obj = Device('deviceid')
-        obj.attr = sentinel.a
-        object_map = ObjectMap({'attr': sentinel.b})
-        object_map._diff = {'attr': 'sanitized sentinel.b'}
-
-        ret = t.adm._update(obj, object_map)
-
-        DatamapUpdateEvent.assert_called_with(t.adm._dmd, object_map, obj)
-        t.notify.assert_called_with(DatamapUpdateEvent.return_value)
-        t.assertEqual(obj.attr, 'sanitized sentinel.b')
-        t.assertTrue(ret)
-
-    @patch('{src}.DatamapUpdateEvent'.format(**PATH), autospec=True)
-    def test__update_ignore_undefined(t, DatamapUpdateEvent):
-        '''do not set new attributes on a device where they are not defined
-        '''
-        obj = Device('deviceid')
-        undefined = 'undefined_attr'
-        t.assertFalse(hasattr(obj, undefined))
-        obj.attr = sentinel.a
-        object_map = ObjectMap({'attr': sentinel.b})
-        object_map._diff = {'attr': 'sanitized sentinel.b', undefined: 'NO'}
-
-        ret = t.adm._update(obj, object_map)
-
-        DatamapUpdateEvent.assert_called_with(t.adm._dmd, object_map, obj)
-        t.notify.assert_called_with(DatamapUpdateEvent.return_value)
-        t.assertEqual(obj.attr, 'sanitized sentinel.b')
-        t.assertFalse(hasattr(obj, undefined))
-        t.assertTrue(ret)
-
-    @patch('{src}._remove_relationship'.format(**PATH), autospec=True)
-    def test__remove_missing_obj(t, _remove_relationship):
-        # Why is this exception iterable?!
-        _remove_relationship.side_effect = [ObjectNotFound()]
-        device = sentinel.device
-        objmap = Mock(_target=device, )
-
-        ret = t.adm._remove(device, 'relname', objmap)
-
-        _remove_relationship.assert_called_with(
-            device, 'relname', objmap._target
-        )
-        t.assertEqual(ret, False)
-
-    @patch('{src}._update_object'.format(**PATH), autospec=True)
-    @patch('{src}._add_object_to_relationship'.format(**PATH), autospec=True)
-    @patch('{src}._create_object'.format(**PATH), autospec=True)
-    def test__add_related_object(
-        t, _create_object, _add_object_to_relationship, _update_object
-    ):
-        device, objmap = t._device_and_objmap()
-        objmap._parent = device
-        objmap._diff = sentinel.diff
-
-        t.adm._add_related_object(device, objmap._relname, objmap)
-
-        _create_object.assert_called_with(objmap, device)
-        _add_object_to_relationship.assert_called_with(
-            device, objmap._relname, _create_object.return_value
-        )
-        _update_object.assert_called_with(
-            device.relationship._getOb.return_value, objmap._diff
-        )
 
     def test_stop(t):
         '''legacy method, noop
@@ -736,16 +586,24 @@ class Test__validate_datamap(TestCase):
     def test_relationshipmap(t):
         datamap = RelationshipMap()
         ret = _validate_datamap(
-            datamap, 'relname', 'compname', 'modname', 'parentId'
+            sentinel.device, datamap,
+            'relname', 'compname', 'modname', 'parentId'
         )
         t.assertEqual(ret, datamap)
 
+    #FIXME!!!
     def test_objectmap(t):
         datamap = ObjectMap({'id': sentinel.deviceid})
+
         ret = _validate_datamap(
-            datamap, None, 'compname', 'modname', 'parentId'
+            sentinel.device, datamap,
+            None, 'compname', 'modname', 'parentId'
         )
-        t.assertEqual(ret, datamap)
+
+        t.assertIsInstance(ret, IncrementalDataMap)
+        t.assertEqual(ret._base, sentinel.device)
+        #t.assertEqual(ret.path, 'compname')  # May need to add these checks
+
 
     def test_relname_means_relationshipmap(t):
         '''Legacy API Asumption:
@@ -755,7 +613,12 @@ class Test__validate_datamap(TestCase):
         object_map = ObjectMap({'id': sentinel.deviceid})
         datamap = [object_map]
         ret = _validate_datamap(
-            datamap, 'relname', 'compname', sentinel.modname, 'parentId'
+            sentinel.device,
+            datamap,
+            'relname',
+            'compname',
+            sentinel.modname,
+            'parentId'
         )
 
         t.assertIsInstance(ret, RelationshipMap)
@@ -763,15 +626,17 @@ class Test__validate_datamap(TestCase):
             t.assertEqual(objmap.modname, sentinel.modname)
             t.assertEqual(objmap.id, sentinel.deviceid)
 
-    def test_build_objectmap_from_dict(t):
+    def test_build_incrementalmap_from_dict(t):
+        device = Device(id=sentinel.deviceid)
         datamap = {'id': sentinel.deviceid}
         ret = _validate_datamap(
-            datamap, None, sentinel.compname, sentinel.modname, 'parentId'
+            device, datamap,
+            None, sentinel.compname, sentinel.modname, 'parentId'
         )
-        t.assertIsInstance(ret, ObjectMap)
+        t.assertIsInstance(ret, IncrementalDataMap)
         t.assertEqual(ret.id, sentinel.deviceid)
         t.assertEqual(ret.modname, sentinel.modname)
-        t.assertEqual(ret.compname, sentinel.compname)
+        t.assertEqual(ret.path, sentinel.compname)
 
 
 class Test_process_relationshipmap(TestCase):
@@ -870,86 +735,6 @@ class Test_get_relationship_ids(TestCase):
         t.assertEqual(ret, set(['r1', 'r2', 'r3']))
 
 
-class Test_set_related_object_directive(TestCase):
-
-    def setUp(t):
-        t.relname = 'relationship_name'
-        t.object_id = sentinel.object_id
-        t.object_map = ObjectMap({'modname': 'module', 'id': t.object_id})
-        t.device = Mock(name='Device')
-        t.related_object = Mock(name='related_object')
-        t.related_object.isLockedFromUpdates.return_value = False
-        t.related_object.isLockedFromDeletion.return_value = False
-
-        patches = ['_get_relationship_ids', '_get_objmap_target']
-
-        for target in patches:
-            patcher = patch('{src}.{}'.format(target, **PATH), autospec=True)
-            setattr(t, target, patcher.start())
-            t.addCleanup(patcher.stop)
-
-        t._get_objmap_target.return_value = t.related_object
-
-    def test_given_remove(t):
-        t.object_map.remove = True
-        ret = _set_related_object_directive(t.device, t.relname, t.object_map)
-
-        t.assertEqual(t.object_map._parent, t.device)
-        t.assertEqual(ret._directive, 'remove')
-        t.assertEqual(t.object_map._directive, 'remove')
-
-    def test_given__remove(t):
-        t.object_map._remove = True
-        ret = _set_related_object_directive(t.device, t.relname, t.object_map)
-        t.assertEqual(ret._directive, 'remove')
-
-    def test_device_locked_from_deletion(t):
-        t.object_map._remove = True
-        t.related_object.isLockedFromDeletion.return_value = True
-        ret = _set_related_object_directive(t.device, t.relname, t.object_map)
-        t.assertEqual(ret._directive, 'delete_locked')
-
-    def test_set_add(t):
-        t._get_relationship_ids.return_value = {}
-        ret = _set_related_object_directive(t.device, t.relname, t.object_map)
-        t.assertEqual(ret._directive, 'add')
-
-    @patch('{src}._om_class_changed'.format(**PATH), autospec=True)
-    def test_set_rebuild(t, _om_class_changed):
-        _om_class_changed.return_value = True
-        t._get_relationship_ids.return_value = {t.object_id}
-        ret = _set_related_object_directive(t.device, t.relname, t.object_map)
-        t.assertEqual(ret._directive, 'rebuild')
-
-    @patch('{src}._objectmap_to_device_diff'.format(**PATH), autospec=True)
-    @patch('{src}._om_class_changed'.format(**PATH), autospec=True)
-    def test_set_update(
-        t, _om_class_changed, _objectmap_to_device_diff,
-    ):
-        t._get_relationship_ids.return_value = {t.object_id}
-        _om_class_changed.return_value = False
-        _objectmap_to_device_diff.return_value = {'attr': 'updated'}
-
-        ret = _set_related_object_directive(t.device, t.relname, t.object_map)
-
-        t._get_relationship_ids.assert_called_with(t.device, t.relname)
-        t.assertEqual(ret._directive, 'update')
-
-    @patch('{src}._objectmap_to_device_diff'.format(**PATH), autospec=True)
-    @patch('{src}._om_class_changed'.format(**PATH), autospec=True)
-    def test_object_locked_from_updates(
-        t, _om_class_changed, _objectmap_to_device_diff,
-    ):
-        t._get_relationship_ids.return_value = {t.object_id}
-        _om_class_changed.return_value = False
-        _objectmap_to_device_diff.return_value = {'attr': 'updated'}
-        t.related_object.isLockedFromUpdates.return_value = True
-
-        ret = _set_related_object_directive(t.device, t.relname, t.object_map)
-
-        t.assertEqual(ret._directive, 'update_locked')
-
-
 class Test__get_objmap_target(TestCase):
 
     def test__get_objmap_target(t):
@@ -979,207 +764,6 @@ class Test__get_objmap_target(TestCase):
 
         device.getObjByPath.assert_called_with('component_name')
         t.assertEqual(ret, sentinel.component)
-
-
-class Test__get_objmap_parent(TestCase):
-
-    def test__getobjmap_parent(t):
-        parent_id = 'pid'
-        device = Mock(name='device', spec_set=['id', ], id=parent_id, )
-        object_map = ObjectMap({'id': 'object_id', 'parentId': parent_id})
-
-        ret = _get_objmap_parent(device, object_map)
-
-        t.assertEqual(ret, device)
-
-    def test__getobjmap_parent_is_component(t):
-        parent_id = 'pid'
-        device = Mock(
-            name='device', spec_set=['id', 'componentSearch'], id='not pid',
-        )
-        object_map = ObjectMap({'id': 'object_id', 'parentId': parent_id})
-
-        ret = _get_objmap_parent(device, object_map)
-
-        device.componentSearch.assert_called_with(id=parent_id)
-        t.assertEqual(ret, device.componentSearch.return_value)
-
-    def test__getobjmap_parent_not_found(t):
-        device = Mock(name='device', spec_set=['id', ], id='not pid', )
-        object_map = ObjectMap({'id': 'object_id', })
-
-        ret = _get_objmap_parent(device, object_map)
-
-        t.assertEqual(ret, device)
-
-
-class Test_om_class_changed(TestCase):
-
-    def setUp(t):
-        t.obj = Device('oid')
-        t.object_map = ObjectMap(data={
-            'id': 'objectid',
-            'modname': 'Products.ZenModel.Device',
-            'classname': 'Device'
-        })
-
-    def test_unchanged(t):
-        ret = _om_class_changed(t.object_map, t.obj)
-        t.assertEqual(ret, False)
-
-    def test_class_changed(t):
-        t.object_map.classname = 'NewDevice'
-        ret = _om_class_changed(t.object_map, t.obj)
-        t.assertEqual(ret, True)
-
-    def test_class_is_nullstr(t):
-        t.object_map.classname = ''
-        ret = _om_class_changed(t.object_map, t.obj)
-        t.assertEqual(ret, False)
-
-    @patch('{src}.inspect'.format(**PATH), autospec=True)
-    def test_handles_exception_getting_obj_class(t, inspect):
-        inspect.getmodule.side_effect = Exception()
-        ret = _om_class_changed(t.object_map, t.obj)
-        t.assertEqual(ret, True)
-
-    def test_module_changed(t):
-        t.object_map.modname = 'Products.ZenModel.NewDevice'
-        ret = _om_class_changed(t.object_map, t.obj)
-        t.assertEqual(ret, True)
-
-
-class Test__process_objectmap(TestCase):
-
-    def test_given_directive(t):
-        object_map = ObjectMap({'_directive': 'update'})
-        ret = _process_objectmap(object_map, sentinel.device)
-        t.assertEqual(ret, object_map)
-        t.assertEqual(object_map._directive, 'update')
-        t.assertEqual(object_map._parent, sentinel.device)
-
-    def test_legacy_directive(t):
-        object_map = ObjectMap({'_remove': True})
-        ret = _process_objectmap(object_map, sentinel.device)
-        t.assertEqual(ret, object_map)
-        t.assertEqual(object_map._directive, 'remove')
-
-    @patch('{src}._set_objectmap_directive'.format(**PATH), autospec=True)
-    def test_unknown_directive(t, _set_objectmap_directive):
-        '''_process_objectmap calls _set_objectmap_directive
-        if a directive is not given
-        '''
-        device = Mock(name='device', spec_set=['getObjByPath', ])
-        object_map = ObjectMap({})
-        ret = _process_objectmap(object_map, device)
-        t.assertEqual(ret, _set_objectmap_directive.return_value)
-
-    def test_handles_relname(t):
-        object_map = ObjectMap({'_directive': 'update', 'relname': 'rel'})
-        ret = _process_objectmap(object_map, sentinel.device)
-        t.assertEqual(ret, object_map)
-        t.assertEqual(object_map._directive, 'update')
-        t.assertEqual(object_map._parent, sentinel.device)
-        t.assertEqual(object_map._relname, 'rel')
-
-    def test_handles_incremental_updates(t):
-        device = Mock(Device)
-        object_map = ObjectMap({
-            "id": "eth0",
-            "compname": "os",
-            "relname": "interfaces",
-            'remove': True,
-        })
-
-        ret = _process_objectmap(object_map, device)
-
-        t.assertIsInstance(ret, IncrementalDataMap)
-
-    @patch('{src}._objectmap_to_device_diff'.format(**PATH), autospec=True)
-    def test_legacy_update_includes_diff(t, _objectmap_to_device_diff):
-        '''Update directives must include a diff
-        '''
-        object_map = ObjectMap({'_update': True})
-        device = Mock(name='device', spec_set=['getObjByPath', ])
-
-        ret = _process_objectmap(object_map, device)
-
-        _objectmap_to_device_diff.assert_called_with(object_map, device)
-        t.assertEqual(ret, object_map)
-        t.assertEqual(object_map._diff, _objectmap_to_device_diff.return_value)
-
-    @patch('{src}.IncrementalDataMap'.format(**PATH), autospec=True)
-    def test_checks_update_locks(t, IncrementalDataMap):
-        IncrementalDataMap.side_effect = InvalidIncrementalDataMapError()
-        object_map = ObjectMap({'_directive': 'update'})
-        device = Mock(
-            name='device', spec_set=['getObjByPath', 'isLockedFromUpdates'],
-            isLockedFromUpdates=Mock(return_value=True),
-        )
-
-        ret = _process_objectmap(object_map, device)
-
-        t.assertEqual(ret, object_map)
-        t.assertEqual(object_map._directive, 'update_locked')
-
-    @patch('{src}.IncrementalDataMap'.format(**PATH), autospec=True)
-    def test_checks_delete_locks(t, IncrementalDataMap):
-        IncrementalDataMap.side_effect = InvalidIncrementalDataMapError()
-        object_map = ObjectMap({'_directive': 'remove'})
-        device = Mock(
-            name='device', spec_set=['getObjByPath', 'isLockedFromDeletion'],
-            isLockedFromDeletion=Mock(return_value=True),
-        )
-
-        ret = _process_objectmap(object_map, device)
-
-        t.assertEqual(ret, object_map)
-        t.assertEqual(object_map._directive, 'delete_locked')
-
-    def test_do_not_change_device_id(t):
-        device = Mock(name='device', spec_set=['id', 'getObjByPath', ], id='x')
-        object_map = ObjectMap({'id': 'new_id'})
-
-        ret = _process_objectmap(object_map, device)
-
-        t.assertNotIn('id', ret._diff)
-
-
-class Test_set_objectmap_directive(TestCase):
-
-    def setUp(t):
-        t.object_id = sentinel.object_id
-        t.object_map = Mock(
-            ObjectMap, name='object_map', modname='module', id=t.object_id,
-            _relname='relationship_name', _directive=None
-        )
-        t.device = Mock(name='Device')
-        t.device.isLockedFromUpdates.return_value = False
-
-        _get_relationship_ids_patcher = patch(
-            '{src}._get_relationship_ids'.format(**PATH), autospec=True
-        )
-        t._get_relationship_ids = _get_relationship_ids_patcher.start()
-        t.addCleanup(_get_relationship_ids_patcher.stop)
-
-    @patch('{src}._objectmap_to_device_diff'.format(**PATH), autospec=True)
-    def test_set_update(t, _objectmap_to_device_diff):
-        '''set _directive = 'add' if object_map.id not in relathinship ids
-        '''
-        _objectmap_to_device_diff.return_value = {'attr': 'has changed'}
-        _set_objectmap_directive(t.object_map, t.device)
-        t.assertEqual(t.object_map._directive, 'update')
-
-    @patch('{src}._objectmap_to_device_diff'.format(**PATH), autospec=True)
-    def test_set_nochange(t, _objectmap_to_device_diff):
-        _objectmap_to_device_diff.return_value = {}
-        _set_objectmap_directive(t.object_map, t.device)
-        t.assertEqual(t.object_map._directive, 'nochange')
-
-    def test_device_locked_from_updates(t):
-        t.device.isLockedFromUpdates.return_value = True
-        ret = _set_objectmap_directive(t.object_map, t.device)
-        t.assertEqual(ret._directive, 'update_locked')
 
 
 ##############################################################################
@@ -1260,28 +844,3 @@ class Test__create_object(TestCase):
         objmap = ObjectMap({}, modname='py.module.name', classname='ClassName')
         ret = _create_object(objmap)
         t.assertIsNone(ret)
-
-
-class Test_add_object_to_relationship(TestCase):
-
-    def setUp(t):
-        t.obj = Mock(name='obj', spec_set=['id'], id=sentinel.obj_id)
-        t.device = MagicMock(name='device')
-        t.relname = 'relationship'
-
-    def test_add(t):
-        t.device.relationship.hasobject.return_value = False
-        ret = _add_object_to_relationship(t.device, t.relname, t.obj)
-        t.device.relationship._setObject.assert_called_with(t.obj.id, t.obj)
-        t.assertEqual(ret, True)
-
-    def test_missing_relationship_exception(t):
-        setattr(t.device, t.relname, None)
-        with t.assertRaises(ObjectCreationError):
-            _add_object_to_relationship(t.device, t.relname, t.obj)
-
-    def test_already_has_object(t):
-        t.device.relationship.hasobject.return_value = True
-        ret = _add_object_to_relationship(t.device, t.relname, t.obj)
-        t.device.addRelation.assert_not_called()
-        t.assertEqual(ret, True)

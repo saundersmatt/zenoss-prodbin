@@ -7,7 +7,6 @@
 #
 ##############################################################################
 
-import inspect
 import logging
 
 from ZODB.transact import transact
@@ -17,27 +16,19 @@ from metrology.registry import registry
 import Globals  # noqa. required to import zenoss Products
 from Products.ZenUtils.MetricReporter import QueueGauge
 from Products.ZenUtils.Utils import importClass
-from Products.DataCollector.Exceptions import ObjectCreationError
 from Products.DataCollector.plugins.DataMaps import RelationshipMap, ObjectMap
 from Products.ZenModel.ZenModelRM import ZenModelRM
-from Products.ZenRelations.Exceptions import ObjectNotFound
 
 from .incrementalupdate import (
     IncrementalDataMap,
-    InvalidIncrementalDataMapError,
 )
 from .datamaputils import (
-    _check_the_locks,
     _locked_from_updates,
     _locked_from_deletion,
-    directive_map,
-    _evaluate_legacy_directive,
-    _objectmap_to_device_diff,
-    _update_object,
 )
 
 from .reporter import ADMReporter
-from .events import DatamapAddEvent, DatamapUpdateEvent
+from .events import DatamapAddEvent
 
 
 log = logging.getLogger("zen.ApplyDataMap")
@@ -82,20 +73,7 @@ class ApplyDataMap(object):
             )
         self._urGauge = registry.get(metricName) # remove?
 
-        self._build_directive_map()
-
         self._reporter = ADMReporter()
-
-    def _build_directive_map(self):
-        self._directive_map = {
-            'update_locked': self._update_locked,
-            'delete_locked': self._delete_locked,
-            'nochange': self._nochange,
-            'remove': self._remove,
-            'update': self._update,
-            'add': self._add,
-            'rebuild': self._rebuild,
-        }
 
     def setDeviceClass(self, device, deviceClass=None):
         """
@@ -116,7 +94,7 @@ class ApplyDataMap(object):
         compname="",
         modname="",
         parentId="",
-        commit=True
+        commit=True,
     ):
         """Apply a datamap passed as a list of dicts through XML-RPC,
         A RelatinshipMap, or an ObjectMap
@@ -135,12 +113,13 @@ class ApplyDataMap(object):
         @return: True if updated, False if not
         """
         log.debug('requested applyDataMap for device=%s', device)  # pragma: no mutate
-
+        notify(DatamapAddEvent(self._dmd, datamap, device))
         if not device or _locked_from_updates(device):
             log.warn('device is locked from updates: device=%s', device)  # pragma: no mutate
             return False
 
         datamap = _validate_datamap(
+            device,
             datamap,
             relname=relname,
             compname=compname,
@@ -148,19 +127,13 @@ class ApplyDataMap(object):
             parentId=parentId
         )
 
-        notify(DatamapAddEvent(self._dmd, datamap, device))
-
         # Preprocess datamap, setting directive and diff
         if isinstance(datamap, RelationshipMap):
             datamap = _process_relationshipmap(datamap, device)
             if not datamap:
                 return False
             adm_method = self._apply_relationshipmap
-        elif not isinstance(datamap, IncrementalDataMap):
-            datamap = _process_objectmap(datamap, device)
-            adm_method = self._apply_objectmap
-
-        if isinstance(datamap, IncrementalDataMap):
+        else:
             adm_method = self._apply_incrementalmap
 
         # apply the changes
@@ -189,9 +162,6 @@ class ApplyDataMap(object):
             if isinstance(object_map, IncrementalDataMap):
                 object_map.apply()
 
-            elif isinstance(object_map, ObjectMap):
-                self._apply_objectmap(object_map, device)
-
             elif isinstance(object_map, ZenModelRM):
                 # add the relationship to the device
                 device.addRelation(relname, object_map)
@@ -200,77 +170,9 @@ class ApplyDataMap(object):
                     'expected ObjectMap, found %s' % object_map.__class__  # pragma: no mutate
                 )
 
-    def _apply_objectmap(self, object_map, device):
-        '''Add/Update/Remove objects to the target relationship.
-
-        Return True if a change was made or false if no change was made.
-        '''
-        log.debug('_apply_objectmap: _directive=%s', object_map._directive)  # pragma: no mutate
-
-        relname = getattr(object_map, '_relname', None)
-
-        return self._directive_map[object_map._directive](
-            device=device, relname=relname, object_map=object_map
-        )
-
     def _apply_incrementalmap(self, incremental_map, device):
         log.debug('_apply_incrementalmap: incremental_map=%s', incremental_map)  # pragma: no mutate
         return incremental_map.apply()
-
-    def _update_locked(self, device, object_map, **kwargs):
-        return False
-
-    def _delete_locked(self, device, **kwargs):
-        return False
-
-    def _nochange(self, **kwargs):
-        return False
-
-    def _remove(self, device, relname, object_map, **kwargs):
-        log.debug(
-            '_remove: parent=%s, relname=%s, target=%s',  # pragma: no mutate
-            device, relname, object_map._target
-        )
-        try:
-            return _remove_relationship(device, relname, object_map._target)
-        except ObjectNotFound:
-            log.exception(
-                'attempted to remove non-existent relation'  # pragma: no mutate
-                ' parent=%s, relname=%s, obj=%s',  # pragma: no mutate
-                device, relname, object_map._target,
-            )
-
-            return False
-
-    def _update(self, device, object_map, **kwargs):
-        obj = _get_objmap_target(device, object_map)
-        log.debug('_update: object=%s', obj)  # pragma: no mutate
-        notify(DatamapUpdateEvent(self._dmd, object_map, device))
-        return _update_object(obj, object_map._diff)
-
-    def _add(self, device, relname, object_map, **kwargs):
-        log.debug(
-            '_add: device=%s, relationship=%s, object=%s',  # pragma: no mutate
-            device, relname, object_map
-        )
-        self._add_related_object(device, relname, object_map)
-        return True
-
-    def _rebuild(self, device, relname, object_map, **kwargs):
-        log.debug(
-            '_rebuild: device=%s, relationship=%s, object=%s',  # pragma: no mutate
-            device, relname, object_map
-        )
-        _remove_relationship(device, relname, object_map)
-        self._add_related_object(device, relname, object_map)
-        return True
-
-    def _add_related_object(self, device, relname, object_map):
-        new_object = _create_object(object_map, object_map._parent)
-        _add_object_to_relationship(object_map._parent, relname, new_object)
-        relationship = getattr(object_map._parent, relname)
-        obj = relationship._getOb(new_object.id)
-        _update_object(obj, object_map._diff)
 
     def stop(self):
         pass
@@ -279,7 +181,11 @@ class ApplyDataMap(object):
         if isinstance(datamap, RelationshipMap):
             self._report_relationshipmap_changes(datamap, device)
 
-            counts = {directive: 0 for directive in self._directive_map.keys()}
+            directives = [
+                'nochange', 'update', 'add', 'remove', 'rebuild',
+                'update_locked', 'delete_locked',
+            ]
+            counts = {directive: 0 for directive in directives}
             for object_map in datamap:
                 counts[object_map._directive] += 1
                 self._reporter.report_directive(device, object_map)
@@ -329,10 +235,10 @@ class ApplyDataMap(object):
         for the monkeypatch in ZenPacks.zenoss.PythonCollector
         ZenPacks/zenoss/PythonCollector/patches/platform.py
         '''
-        #print('WARNING: _updateRelationship is Deprecated')
-        #print('called with %s, %s' % (device, relmap))
+        if device.id == 'VirtualMachine_vm-939':
+            print('WARNING: _updateRelationship is Deprecated')
+            print('called with %s, %s' % (device, relmap))
         self.applyDataMap(device=device, datamap=relmap)
-        pass
 
     def _removeRelObject(self, device, objmap, relname):
         '''This stub is left to satisfy backwards compatability requirements
@@ -341,22 +247,47 @@ class ApplyDataMap(object):
         '''
         print('WARNING: _removeRelObject is Deprecated')
         #print('called with %s, %s, %s' %( device, objmap, relname))
-        pass
 
     def _createRelObject(self, device, objmap, relname):
         '''This stub is left to satisfy backwards compatability
         '''
-        #print('WARNING: _createRelObject is Deprecated')
+        if objmap.id == 'VirtualMachine_vm-939':
+            print('WARNING: _createRelObject is Deprecated')
+            print('called with %s, %s, %s' % (device, objmap, relname))
         objmap.relname = relname
         idm = IncrementalDataMap(device, objmap)
         changed = self.applyDataMap(device=device, datamap=idm)
         return (changed, idm.target)
 
 
-
 ##############################################################################
 # Preproce, diff and set directives
 ##############################################################################
+
+def _validate_datamap(device, datamap, relname, compname, modname, parentId):
+    if isinstance(datamap, RelationshipMap):
+        log.debug('_validate_datamap: got valid RelationshipMap')  # pragma: no mutate
+    elif relname:
+        log.debug('_validate_datamap: build relationship_map using relname')  # pragma: no mutate
+        datamap = RelationshipMap(
+            relname=relname,
+            compname=compname,
+            modname=modname,
+            objmaps=datamap,
+            parentId=parentId
+        )
+    elif isinstance(datamap, IncrementalDataMap):
+        log.debug('_validate_datamap: got valid IncrementalDataMap')  # pragma: no mutate
+    elif isinstance(datamap, ObjectMap):
+        log.debug('_validate_datamap: got valid ObjectMap')  # pragma: no mutate
+        datamap = IncrementalDataMap(device, datamap)
+    else:
+        log.debug('_validate_datamap: build object_map')  # pragma: no mutate
+        datamap = ObjectMap(datamap, compname=compname, modname=modname)
+        datamap = IncrementalDataMap(device, datamap)
+
+    return datamap
+
 
 def _get_relmap_target(device, relmap):
     '''get the device object associated with this map
@@ -381,8 +312,9 @@ def _get_relmap_target(device, relmap):
     return device
 
 
+# Used by relmap add
 def _get_objmap_target(device, objmap):
-    objmap._target = device
+    objmap._target = device  # default target is base
 
     target_path = getattr(objmap, 'compname', None)
     if target_path:
@@ -395,16 +327,6 @@ def _get_objmap_target(device, objmap):
         log.warn('_get_objmap_target: Unable to find target object')  # pragma: no mutate
 
     return objmap._target
-
-
-def _get_objmap_parent(device, objmap):
-    parent_id = getattr(objmap, "parentId", None)
-    if parent_id:
-        if device.id == parent_id:
-            return device
-        else:
-            return device.componentSearch(id=parent_id)
-    return device
 
 
 def _validate_device_class(device):
@@ -444,29 +366,6 @@ def _get_object_by_pid(device, parent_id):
     return None
 
 
-def _validate_datamap(datamap, relname, compname, modname, parentId):
-    if isinstance(datamap, RelationshipMap):
-        log.debug('_validate_datamap: got valid RelationshipMap')  # pragma: no mutate
-    elif relname:
-        log.debug('_validate_datamap: build relationship_map using relname')  # pragma: no mutate
-        datamap = RelationshipMap(
-            relname=relname,
-            compname=compname,
-            modname=modname,
-            objmaps=datamap,
-            parentId=parentId
-        )
-    elif isinstance(datamap, ObjectMap):
-        log.debug('_validate_datamap: got valid ObjectMap')  # pragma: no mutate
-    elif isinstance(datamap, IncrementalDataMap):
-        log.debug('_validate_datamap: got valid IncrementalDataMap')  # pragma: no mutate
-    else:
-        log.debug('_validate_datamap: build object_map')  # pragma: no mutate
-        datamap = ObjectMap(datamap, compname=compname, modname=modname)
-
-    return datamap
-
-
 def _process_relationshipmap(relmap, base_device):
     relname = relmap.relname
     parent = _get_relmap_target(base_device, relmap)
@@ -488,15 +387,9 @@ def _process_relationshipmap(relmap, base_device):
     # to be deleted (device, relationship_name, object/id)
     relmap._diff = _get_relationshipmap_diff(relmap._parent, relmap)
 
-    # Try replacing the old object maps with incremental maps
-
     for object_map in relmap:
-        #object_map._parent = relmap._parent
         object_map.relname = relmap.relname
-        #if not hasattr(object_map, '_relname'):
-        #    object_map._relname = relname
-        #_set_related_object_directive(relmap._parent, relname, object_map)
-
+    # Try replacing the old object maps with incremental maps
     new_maps = [
         IncrementalDataMap(parent, object_map)
         for object_map in relmap.maps
@@ -529,111 +422,6 @@ def _get_relationship_ids(device, relationship_name):
     return set(relationship.objectIdsAll())
 
 
-def _set_related_object_directive(device, relname, object_map):
-    '''given an object map from a relationship map
-    set the directive for the related object
-    '''
-
-    # Can I just...
-
-
-
-    object_map = _evaluate_legacy_directive(object_map)
-
-    obj = _get_objmap_target(device, object_map)
-    object_map._parent = _get_objmap_parent(device, object_map)
-
-    if hasattr(object_map, '_directive'):
-        log.debug('_set_related_object_directive: already has directive')  # pragma: no mutate
-        _check_the_locks(object_map, obj)
-        return object_map
-
-    _set_objectmap_directive(object_map, obj)
-
-    relationship_ids = _get_relationship_ids(device, relname)
-
-    if obj and object_map.id in relationship_ids:
-        if _om_class_changed(object_map, obj):
-            object_map._directive = directive_map['_rebuild']
-    else:
-        object_map._directive = directive_map['_add']
-
-    _check_the_locks(object_map, obj)
-    return object_map
-
-
-def _om_class_changed(object_map, obj):
-    '''Handle the possibility of objects changing class by
-    recreating them. Ticket #5598.
-    a classname of null-string indicates no change
-    '''
-    if object_map.classname == '':
-        return False
-
-    existing_modname, existing_classname = '', ''
-    try:
-        existing_modname = inspect.getmodule(obj).__name__
-        existing_classname = obj.__class__.__name__
-    except Exception:
-        pass
-
-    if (  # object class has not changed
-        object_map.modname == existing_modname
-        and object_map.classname == existing_classname
-    ):
-        log.debug('_om_class_changed: object map matches')  # pragma: no mutate
-        return False
-
-    log.debug('_om_class_changed: object_map class changed')  # pragma: no mutate
-    return True
-
-
-def _process_objectmap(object_map, device):
-    try:
-        return IncrementalDataMap(device, object_map)
-    except InvalidIncrementalDataMapError:
-        log.info('_evaluate_incremental_update: not an incremental update')  # pragma: no mutate
-
-    object_map._directive = getattr(object_map, '_directive', None)
-    object_map._target = _get_objmap_target(device, object_map)
-    object_map._parent = _get_objmap_parent(device, object_map)
-
-    if not object_map._directive:
-        object_map = _evaluate_legacy_directive(object_map)
-
-    if not object_map._directive:
-        object_map = _set_objectmap_directive(object_map, object_map._target)
-
-    if object_map._directive == 'update' and not hasattr(object_map, '_diff'):
-        object_map._diff = _objectmap_to_device_diff(
-            object_map, object_map._target
-        )
-
-    _check_the_locks(object_map, device)
-
-    relname = getattr(object_map, 'relname', None)
-    if relname:
-        object_map._relname = relname
-
-    return object_map
-
-
-def _set_objectmap_directive(object_map, device):
-    # Do not modify Locked devices
-    if _locked_from_updates(device):
-        object_map._directive = 'update_locked'
-        return object_map
-
-    diff = _objectmap_to_device_diff(object_map, device)
-    if diff:
-        object_map._directive = directive_map['_update']
-        object_map._diff = diff
-    else:
-        object_map._directive = directive_map['_nochange']
-
-    return object_map
-
-
 ##############################################################################
 # Apply Changes
 ##############################################################################
@@ -652,7 +440,7 @@ def _remove_relationship(parent, relname, obj):
 
     return True
 
-
+#REMOVE UNUSED?
 def _create_object(object_map, parent_device=None):
     '''Create a new zodb object from an ObjectMap
     '''
@@ -670,23 +458,3 @@ def _create_object(object_map, parent_device=None):
         new_object = None
 
     return new_object
-
-
-def _add_object_to_relationship(device, relname, obj):
-    relationship = getattr(device, relname, None)
-    if not relationship:
-        raise ObjectCreationError(
-            "relationship not found: device=%s, class=%s relationship=%s"  # pragma: no mutate
-            % (device.id, device.__class__, relname,)
-        )
-    if relationship.hasobject(obj):
-        return True
-
-    log.debug(
-        'add related object: object=%s, relationship=%s, related_obj=%s',  # pragma: no mutate
-        device.id, relname, obj
-    )
-    # either use device.addRelation(relname, object_map)
-    # or create the object, then relationship._setObject(obj.id, obj)
-    relationship._setObject(obj.id, obj)
-    return True

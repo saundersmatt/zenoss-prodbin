@@ -1,5 +1,5 @@
 from unittest import TestCase
-from mock import Mock, MagicMock, sentinel, patch
+from mock import Mock, sentinel, patch
 
 from base64 import b64encode
 
