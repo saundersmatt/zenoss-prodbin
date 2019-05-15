@@ -1,10 +1,10 @@
 ##############################################################################
-# 
+#
 # Copyright (C) Zenoss, Inc. 2017, all rights reserved.
-# 
+#
 # This content is made available according to terms specified in
 # License.zenoss under the directory where your Zenoss product is installed.
-# 
+#
 ##############################################################################
 
 import json
@@ -118,7 +118,7 @@ class MetricReporter(Reporter):
 class TwistedMetricReporter(object):
     def __init__(self, interval=30, metricWriter=None, tags={}, *args, **options):
         super(TwistedMetricReporter, self).__init__()
-        self.registry = options.get('registry', registry)
+        self.registry = registry
         self.prefix = options.get('prefix', "")
         self.metricWriter = metricWriter
         self.interval = interval
