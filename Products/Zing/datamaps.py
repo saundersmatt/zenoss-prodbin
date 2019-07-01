@@ -18,8 +18,8 @@ from Products.DataCollector.plugins.DataMaps import (
     RelationshipMap, ObjectMap, MultiArgs, PLUGIN_NAME_ATTR
 )
 from Products.DataCollector.ApplyDataMap import (
-    IDatamapUpdateEvent,
-    IDatamapAddEvent,
+    IDatamapProcessedEvent,
+    IncrementalDataMap,
 )
 
 from Products.Zing import fact as ZFact
@@ -36,17 +36,11 @@ logging.basicConfig()
 log = logging.getLogger("zen.zing.datamaps")
 
 
-@adapter(IDatamapUpdateEvent)
-def zing_add_datamap_context(event):
-    log.debug('zing_add_datamap_context handeling event=%s', event)
-    zing_datamap_handler = ZingDatamapHandler(event.dmd)
-    zing_datamap_handler.add_context(event.objectmap, event.target)
-
-
-@adapter(IDatamapAddEvent)
+@adapter(IDatamapProcessedEvent)
 def zing_add_datamap(event):
     log.debug('zing_add_datamap_context handeling event=%s', event)
     zing_datamap_handler = ZingDatamapHandler(event.dmd)
+    zing_datamap_handler.add_context(event.objectmap, event.target)
     zing_datamap_handler.add_datamap(event.target, event.objectmap)
 
 
@@ -192,10 +186,11 @@ class ZingDatamapHandler(object):
         """
         @return: Fact generator
         """
-        log.debug("Processing {} datamaps to send to zing-connector.".format(len(zing_tx_state.datamaps)))
+        print("Processing {} datamaps to send to zing-connector.".format(len(zing_tx_state.datamaps)))
         facts_per_device = defaultdict(list)
         for device, datamap in zing_tx_state.datamaps:
             dm_facts = self.facts_from_datamap(device, datamap, zing_tx_state.datamaps_contexts)
+            print('dm_facts=%s' % dm_facts)
             if dm_facts:
                 facts_per_device[device].extend(dm_facts)
         return self._generate_facts(facts_per_device, zing_tx_state)
@@ -246,15 +241,18 @@ class ZingDatamapHandler(object):
     def facts_from_datamap(self, device, dm, context):
         facts = []
         dm_plugin = getattr(dm, PLUGIN_NAME_ATTR, None)
+        print('!!! dm_plugin=%s' % dm_plugin)
         if isinstance(dm, RelationshipMap):
             for om in dm.maps:
                 f = self.fact_from_object_map(om, device, dm.relname, context=context, dm_plugin=dm_plugin)
                 if f.is_valid():
                     facts.append(f)
-        elif isinstance(dm, ObjectMap):
+        elif isinstance(dm, ObjectMap) or isinstance(dm, IncrementalDataMap):
             f = self.fact_from_object_map(dm, context=context, dm_plugin=dm_plugin)
             if f.is_valid():
                 facts.append(f)
+        else:
+            print('oops datamap type not found')
         return facts
 
     def apply_extra_fields(self, om_context, f):

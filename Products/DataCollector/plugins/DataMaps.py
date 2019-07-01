@@ -58,11 +58,17 @@ class RelationshipMap(PBSafe):
     def __iter__(self):
         return iter(self.maps)
 
-    def append(self, obj):
-        self.maps.append(obj)
+    def append(self, objmap):
+        self._add_map(objmap)
 
     def extend(self, objmaps):
-        self.maps.extend(objmaps)
+        for map in objmaps:
+            self._add_map(map)
+
+    def _add_map(self, objmap):
+        if self.plugin_name and not getattr(objmap, 'plugin_name', None):
+            objmap.plugin_name = self.plugin_name
+        self.maps.append(objmap)
 
     def asUnitTest(self):
         """

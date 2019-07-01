@@ -8,7 +8,7 @@
 ##############################################################################
 
 from unittest import TestCase
-from mock import Mock, create_autospec, patch, sentinel, MagicMock
+from mock import Mock, create_autospec, patch, sentinel, MagicMock, call
 
 from Products.ZenModel.Device import Device
 from ..applydatamap import (
@@ -86,7 +86,8 @@ class ApplyDataMapTests(TestCase):
 
     def setUp(t):
         patches = [
-            'notify', '_get_relmap_target', 'ADMReporter', 'DatamapAddEvent'
+            'notify', '_get_relmap_target', 'ADMReporter',
+            'DatamapAddEvent', 'DatamapProcessedEvent',
         ]
 
         for target in patches:
@@ -286,7 +287,13 @@ class ApplyDataMapTests(TestCase):
             device, objmap, compname='', modname='', parentId='', relname=''
         )
         t.DatamapAddEvent.assert_called_with(t.adm._dmd, objmap, device)
-        t.notify.assert_called_with(t.DatamapAddEvent.return_value)
+        t.DatamapProcessedEvent.assert_called_with(
+            t.adm._dmd, incmap, incmap.target
+        )
+        t.notify.assert_has_calls([
+            call(t.DatamapAddEvent.return_value),
+            call(t.DatamapProcessedEvent.return_value),
+        ])
         # not called
         t.assertFalse(transact.call_args_list)
         incmap.apply.assert_called_with()
