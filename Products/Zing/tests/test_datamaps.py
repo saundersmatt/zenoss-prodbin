@@ -170,6 +170,51 @@ class TestIncrementalDataMapHandler(TestCase):
             facts[2].metadata,
         )
 
+    @patch('{src}.subscribers'.format(**PATH), autospec=True)
+    def test_generate_facts_handles_missing_parent_uuid(t, subscribers):
+        # registered event handlers
+        subscribers.return_value = [
+            ObjectMapContextProvider1(''), ObjectMapContextProvider2('')
+        ]
+        t.target.getDeviceClassName.return_value = 'getDeviceClassName'
+        t.target.getDeviceGroupNames.return_value = 'getDeviceGroupNames'
+        t.target.getLocationName.return_value = 'getLocationName'
+        t.target.getSystemNames.return_value = 'getSystemNames'
+
+        # ApplyDataMap side-effects, current implementation expects this
+        for attr, value in t.idm.iteritems():
+            setattr(t.target, attr, value)
+
+        t.assertEqual(t.target.metadata2, 'objectmap m2')
+
+        zdh = ZingDatamapHandler(Mock(name='dmd'))
+        zdh.add_datamap(t.target, t.idm)
+        zdh.add_context(t.idm, t.target)
+
+        t.parent.getUUID.side_effect = TypeError('404')
+
+        zing_tx_state = zdh._get_zing_tx_state()
+        ret = zdh.generate_facts(zing_tx_state)
+
+        subscribers.assert_called_with([t.target], IObjectMapContextProvider)
+        t.assertIsInstance(ret, types.GeneratorType)
+        t.maxDiff = None
+        facts = [f for f in ret]
+
+        t.assertEqual(
+            {
+                ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
+                'meta_type': t.target.meta_type,
+                'contextUUID': t.target.getUUID.return_value,
+                'relationship': t.relname,
+                'dimension1': 'device d1',
+                'dimension2': 'objectmap d2',
+                'dimension3': 'omcp1 value3',
+                'dimension4': 'omcp2 value4',
+            },
+            facts[0].metadata,  # AKA dimensions
+        )
+        t.assertNotIn('parent', facts[0].metadata)
 
 
 class TestZingDatamapHandler(TestCase):

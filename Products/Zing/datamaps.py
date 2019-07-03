@@ -255,10 +255,12 @@ class ZingDatamapHandler(object):
         objectmap['id'] = idm.id
         f.update(objectmap)
 
-        f.metadata["parent"] = idm.parent.getUUID()
         f.metadata["relationship"] = idm.relname
         f.metadata[ZFact.FactKeys.PLUGIN_KEY] = idm.plugin_name
-        #f.metadata['id'] = idm.id
+        try:
+            f.metadata["parent"] = idm.parent.getUUID()
+        except Exception:
+            log.debug('parent UUID not found')
 
         # Hack in whatever extra stuff we need.
         om_context = (context or {}).get(idm)
