@@ -403,6 +403,9 @@ def _process_relationshipmap(relmap, base_device):
         _validate_datamap(parent, object_map)
         for object_map in relmap.maps
     ]
+    for map in new_maps:
+        map.plugin_name = relmap.plugin_name
+
     relmap.maps = new_maps
 
     return relmap

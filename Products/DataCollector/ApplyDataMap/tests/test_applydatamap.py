@@ -308,9 +308,6 @@ class ApplyDataMapTests(TestCase):
 
     @patch('{src}._remove_relationship'.format(**PATH), autospec=True)
     def test__apply_relationshipmap(t, _remove_relationship):
-        t.adm._apply_incrementalmap = create_autospec(
-            t.adm._apply_incrementalmap, return_value=True
-        )
         device, relmap = t._device_and_relmap()
         relmap._parent = sentinel.parent
         relmap.maps = [Mock(IncrementalDataMap), Mock(IncrementalDataMap)]
@@ -721,6 +718,7 @@ class Test_process_relationshipmap(TestCase):
         relmap = RelationshipMap(
             relname="interfaces",
             modname="Products.ZenModel.IpInterface",
+            plugin_name='test.plugin',
         )
         om1 = ObjectMap({'id': 'eth0'})
         om2 = ObjectMap({'id': 'eth1'})
@@ -732,6 +730,7 @@ class Test_process_relationshipmap(TestCase):
         for omap in relmap.maps:
             t.assertEqual(omap.relname, relmap.relname)
             t.assertEqual(omap.parent, relmap._parent)
+            t.assertEqual(omap.plugin_name, relmap.plugin_name)
         t.assertEqual(relmap._diff, _get_relationshipmap_diff.return_value)
 
     @patch('{src}._get_relationshipmap_diff'.format(**PATH), autospec=True)
@@ -740,23 +739,27 @@ class Test_process_relationshipmap(TestCase):
         those subsequent objects are given id = id_n
         '''
         device = Mock(name='device')
-        relmap = RelationshipMap(
-            relname="interfaces",
-            modname="Products.ZenModel.IpInterface",
-        )
+
         om1 = ObjectMap({'id': 'eth0'})
         om2 = ObjectMap({'id': 'eth0'})
         om3 = ObjectMap({'id': 'eth0'})
-        relmap.maps = [om1, om2, om3, ]
+        objmaps = [om1, om2, om3, ]
+
+        relmap = RelationshipMap(
+            relname="interfaces",
+            modname="Products.ZenModel.IpInterface",
+            plugin_name='test.plugin',
+            objmaps=objmaps
+        )
 
         _process_relationshipmap(relmap, device)
 
+        t.assertEqual(relmap.plugin_name, 'test.plugin')
         t.assertEqual(len(relmap.maps), 3)
-        t.assertEqual(om1.id, 'eth0')
         t.assertEqual(relmap.maps[0].id, 'eth0')
-        t.assertEqual(om2.id, 'eth0_2')
+        t.assertEqual(relmap.maps[0].plugin_name, 'test.plugin')
         t.assertEqual(relmap.maps[1].id, 'eth0_2')
-        t.assertEqual(om3.id, 'eth0_3')
+        t.assertEqual(relmap.maps[1].id, 'eth0_2')
         t.assertEqual(relmap.maps[2].id, 'eth0_3')
 
 
