@@ -106,17 +106,12 @@ class TestIncrementalDataMapHandler(TestCase):
         from pprint import pprint
         pprint(facts)
         pprint(facts[0].__dict__)
+        pprint(t.idm)
 
         t.assertEqual(
             {
                 'name': t.target.titleOrId.return_value,
-                'id': 'target_id',
-                '_target_id': 'target_id',
-                PLUGIN_NAME_ATTR: 'test_plugin_name',
-                '_classname': '',
-                'modname': '',
-                'path': 'parent.path.may.be.long',
-                'relname': 'relationship_name',
+                'dimension2': 'objectmap d2',
                 'metadata1': 'device m1',
                 'metadata2': 'objectmap m2',
                 'metadata3': ['omcp1 value3', 'omcp2 value3'],
@@ -131,6 +126,8 @@ class TestIncrementalDataMapHandler(TestCase):
                 ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
                 'meta_type': t.target.meta_type,
                 'contextUUID': t.target.getUUID.return_value,
+                'id': 'target_id',
+                'relationship': 'relationship_name',
                 'dimension1': 'device d1',
                 'dimension2': 'objectmap d2',
                 'dimension3': 'omcp1 value3',
@@ -170,6 +167,7 @@ class TestIncrementalDataMapHandler(TestCase):
             },
             facts[2].metadata,
         )
+
 
 
 class TestZingDatamapHandler(TestCase):

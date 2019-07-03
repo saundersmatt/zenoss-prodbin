@@ -238,22 +238,60 @@ class ZingDatamapHandler(object):
                 f.metadata[ZFact.FactKeys.PLUGIN_KEY] = f.metadata[ZFact.FactKeys.META_TYPE_KEY]
         return f
 
+    def fact_from_incremental_map(self, idm, context=None):
+        f = ZFact.Fact()
+        valid_types = (
+            str, int, long, float, bool, list, tuple, MultiArgs, set
+        )
+
+        objectmap = {k: v for k, v in idm.iteritems()}
+        for k, v in objectmap.items():
+            # These types are currently all that the model ingest service can handle.
+            if not isinstance(v, valid_types):
+                del objectmap[k]
+            elif isinstance(v, MultiArgs):
+                objectmap[k] = v.args
+        f.update(objectmap)
+
+        #f.metadata["parent"] = idm.parent.getUUID()
+        f.metadata["relationship"] = idm.relname
+        f.metadata[ZFact.FactKeys.PLUGIN_KEY] = idm.plugin_name
+        f.metadata['id'] = idm.id
+
+        # Hack in whatever extra stuff we need.
+        om_context = (context or {}).get(idm)
+        if om_context is not None:
+            self.apply_extra_fields(om_context, f)
+
+        # FIXME temp solution until we are sure all zenpacks send the plugin
+        if not f.metadata.get(ZFact.FactKeys.PLUGIN_KEY):
+            log.warn("Found fact without plugin information: {}".format(f.metadata))
+            if f.metadata.get(ZFact.FactKeys.META_TYPE_KEY):
+                f.metadata[ZFact.FactKeys.PLUGIN_KEY] = f.metadata[ZFact.FactKeys.META_TYPE_KEY]
+        return f
+
     def facts_from_datamap(self, device, dm, context):
         facts = []
         dm_plugin = getattr(dm, PLUGIN_NAME_ATTR, None)
-        print('!!! dm_plugin=%s' % dm_plugin)
         if isinstance(dm, RelationshipMap):
             for om in dm.maps:
                 f = self.fact_from_object_map(om, device, dm.relname, context=context, dm_plugin=dm_plugin)
                 if f.is_valid():
                     facts.append(f)
-        elif isinstance(dm, ObjectMap) or isinstance(dm, IncrementalDataMap):
+        elif isinstance(dm, ObjectMap):
             f = self.fact_from_object_map(dm, context=context, dm_plugin=dm_plugin)
+            if f.is_valid():
+                facts.append(f)
+        elif isinstance(dm, IncrementalDataMap):
+            f = self.fact_from_incremental_map(dm, context=context)
             if f.is_valid():
                 facts.append(f)
         else:
             print('oops datamap type not found')
         return facts
+
+    def facts_from_incrementaldatamap(self):
+        facts = []
 
     def apply_extra_fields(self, om_context, f):
         """Add information from the ObjectMap context to the fact.
