@@ -57,7 +57,8 @@ class TestIncrementalDataMapHandler(TestCase):
         t.relname = 'relationship_name'
         # get the relationship on the parent
         t.parent = Mock(
-            name='parent', spec_set=['id', t.relname, 'removeRelation']
+            name='parent',
+            spec_set=['id', t.relname, 'removeRelation', 'getUUID'],
         )
         setattr(t.parent, t.relname, t.relationship)
         t.compname = 'parent.path.may.be.long'
@@ -111,6 +112,7 @@ class TestIncrementalDataMapHandler(TestCase):
         t.assertEqual(
             {
                 'name': t.target.titleOrId.return_value,
+                'id': t.idm.id,
                 'dimension2': 'objectmap d2',
                 'metadata1': 'device m1',
                 'metadata2': 'objectmap m2',
@@ -119,21 +121,21 @@ class TestIncrementalDataMapHandler(TestCase):
                 'metadata5': 'omcp1 value5',
                 'metadata6': 'omcp2 value6',
             },
-            facts[0].data,
+            facts[0].data,  # AKA metadata
         )
         t.assertEqual(
             {
                 ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
                 'meta_type': t.target.meta_type,
                 'contextUUID': t.target.getUUID.return_value,
-                'id': 'target_id',
-                'relationship': 'relationship_name',
+                'parent': t.parent.getUUID.return_value,
+                'relationship': t.relname,
                 'dimension1': 'device d1',
                 'dimension2': 'objectmap d2',
                 'dimension3': 'omcp1 value3',
                 'dimension4': 'omcp2 value4',
             },
-            facts[0].metadata,
+            facts[0].metadata,  # AKA dimensions
         )
         t.assertEqual(
             {

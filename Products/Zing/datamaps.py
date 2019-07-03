@@ -251,12 +251,14 @@ class ZingDatamapHandler(object):
                 del objectmap[k]
             elif isinstance(v, MultiArgs):
                 objectmap[k] = v.args
+
+        objectmap['id'] = idm.id
         f.update(objectmap)
 
-        #f.metadata["parent"] = idm.parent.getUUID()
+        f.metadata["parent"] = idm.parent.getUUID()
         f.metadata["relationship"] = idm.relname
         f.metadata[ZFact.FactKeys.PLUGIN_KEY] = idm.plugin_name
-        f.metadata['id'] = idm.id
+        #f.metadata['id'] = idm.id
 
         # Hack in whatever extra stuff we need.
         om_context = (context or {}).get(idm)
