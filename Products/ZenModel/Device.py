@@ -2348,22 +2348,6 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         if not self.monitorDevice():
             return None
 
-        if statusclass is None:
-            statusclass = self.zStatusEventClass
-            zep = getFacade('zep', self)
-            try:
-                event_filter = zep.createEventFilter(
-                    tags=[self.getUUID()],
-                    element_sub_identifier=[""],
-                    severity=[SEVERITY_CRITICAL],
-                    status=[STATUS_NEW, STATUS_ACKNOWLEDGED, STATUS_SUPPRESSED],
-                    event_class=filter(None, [self.zStatusEventClass]))
-
-                result = zep.getEventSummaries(0, filter=event_filter, limit=0)
-                return int(result['total'])
-            except Exception:
-                return None
-
         if statusclass == Status_Ping:
             return self._getPingStatus(statusclass)
 
