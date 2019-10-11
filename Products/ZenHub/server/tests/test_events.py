@@ -125,6 +125,8 @@ class ServiceCallCompletedTest(TestCase):
             for name in ServiceCallEvent.__slots__
             if name not in ("attempts", "error")
         ))
+        self.assertIsNone(event.result)
+        self.assertIsNone(event.retry)
         self.assertEqual(1, event.attempts)
         self.assertIs(exc, event.error)
 
@@ -136,6 +138,8 @@ class ServiceCallCompletedTest(TestCase):
             for name in ServiceCallEvent.__slots__
             if name not in ("attempts", "retry")
         ))
+        self.assertIsNone(event.result)
+        self.assertIsNone(event.error)
         self.assertEqual(1, event.attempts)
         self.assertIs(exc, event.retry)
 
@@ -147,6 +151,8 @@ class ServiceCallCompletedTest(TestCase):
             for name in ServiceCallEvent.__slots__
             if name not in ("attempts", "result")
         ))
+        self.assertIsNone(event.retry)
+        self.assertIsNone(event.error)
         self.assertEqual(1, event.attempts)
         self.assertIs(result, event.result)
 

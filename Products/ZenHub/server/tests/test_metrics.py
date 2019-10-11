@@ -542,3 +542,86 @@ class ServiceCallMetricsTest(TestCase):
             ),
         ), any_order=True)
         self.assertEqual(2, _log.warn.call_count)
+
+
+class ZCMLLayer(object):
+
+    @classmethod
+    def setUp(cls):
+        from Zope2.App import zcml
+        zcml.load_site()
+        from Products.ZenUtils.Utils import load_config
+        import Products.ZenHub as ZENHUB_MODULE
+        load_config("hub.zcml", ZENHUB_MODULE)
+
+
+class TestEventNotification(TestCase):
+    """Test integration with zope's event notification framework."""
+
+    layer = ZCMLLayer
+
+    @patch("{src}.getUtility".format(**PATH))
+    def test_notification(t, _getUtility):
+        from zope.event import notify
+        from ..metrics import _legacy_worklist_counters
+
+        received = ServiceCallReceived(
+            queue="default",
+            service="bar",
+            method="foo",
+            priority=ServiceCallPriority.OTHER,
+            timestamp=1000,
+        )
+        notify(received)
+        t.assertEqual(1, _legacy_worklist_counters["total"])
+        t.assertEqual(1, _legacy_worklist_counters[ServiceCallPriority.OTHER])
+
+        started = ServiceCallStarted(
+            queue="default",
+            service="bar",
+            method="foo",
+            priority=ServiceCallPriority.OTHER,
+            timestamp=1001,
+            attempts=1,
+        )
+        notify(started)
+        t.assertEqual(1, _legacy_worklist_counters["total"])
+        t.assertEqual(1, _legacy_worklist_counters[ServiceCallPriority.OTHER])
+
+        completed = ServiceCallCompleted(
+            queue="default",
+            service="bar",
+            method="foo",
+            priority=ServiceCallPriority.OTHER,
+            timestamp=1002,
+            attempts=1,
+            retry=ValueError("boom"),
+        )
+        notify(completed)
+        t.assertEqual(1, _legacy_worklist_counters["total"])
+        t.assertEqual(1, _legacy_worklist_counters[ServiceCallPriority.OTHER])
+
+        started = ServiceCallStarted(
+            queue="default",
+            service="bar",
+            method="foo",
+            priority=ServiceCallPriority.OTHER,
+            timestamp=1003,
+            attempts=2,
+        )
+        notify(started)
+        t.assertEqual(1, _legacy_worklist_counters["total"])
+        t.assertEqual(1, _legacy_worklist_counters[ServiceCallPriority.OTHER])
+
+        completed = ServiceCallCompleted(
+            queue="default",
+            service="bar",
+            method="foo",
+            priority=ServiceCallPriority.OTHER,
+            timestamp=1004,
+            attempts=2,
+            error=ValueError("boom"),
+        )
+        notify(completed)
+        t.assertEqual(0, _legacy_worklist_counters["total"])
+        t.assertEqual(0, _legacy_worklist_counters[ServiceCallPriority.OTHER])
