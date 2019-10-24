@@ -730,9 +730,16 @@ class PBDaemon(ZenDaemon, pb.Referenceable):
 
     def connect(self):
         pingInterval = self.options.zhPingInterval
-        factory = ReconnectingPBClientFactory(connectTimeout=60, pingPerspective=self.options.pingPerspective,
-                                              pingInterval=pingInterval, pingtimeout=pingInterval * 5)
-        self.log.info("Connecting to %s:%d" % (self.options.hubhost, self.options.hubport))
+        factory = ReconnectingPBClientFactory(
+            connectTimeout=60,
+            pingPerspective=self.options.pingPerspective,
+            pingInterval=pingInterval,
+            pingtimeout=pingInterval * 5,
+        )
+        self.log.info(
+            "Connecting to %s:%d",
+            self.options.hubhost, self.options.hubport,
+        )
         factory.connectTCP(self.options.hubhost, self.options.hubport)
         username = self.options.hubusername
         password = self.options.hubpassword
@@ -746,7 +753,8 @@ class PBDaemon(ZenDaemon, pb.Referenceable):
             if not d.called:
                 self.connectTimeout()
         self._connectionTimeout = reactor.callLater(
-            self.options.hubtimeout, timeout, self.initialConnect)
+            self.options.hubtimeout, timeout, self.initialConnect,
+        )
         return self.initialConnect
 
     def connectTimeout(self):
@@ -833,14 +841,15 @@ class PBDaemon(ZenDaemon, pb.Referenceable):
             self._thresholds = Thresholds()
         return self._thresholds
 
-
     def run(self):
         def stopReporter():
             if self._metrologyReporter:
                 return self._metrologyReporter.stop()
 
-        # Order of the shutdown triggers matter. Want to stop reporter first, calling self.metricWriter() below
-        # registers shutdown triggers for the actual metric http and redis publishers.
+        # Order of the shutdown triggers matter.
+        # Want to stop reporter first, calling self.metricWriter() below
+        # registers shutdown triggers for the actual metric http and
+        # redis publishers.
         reactor.addSystemEventTrigger('before', 'shutdown', stopReporter)
 
         threshold_notifier = self._getThresholdNotifier()
@@ -850,7 +859,6 @@ class PBDaemon(ZenDaemon, pb.Referenceable):
                              threshold_notifier,
                              self.derivativeTracker())
         self.log.debug('Starting PBDaemon initialization')
-        d = self.connect()
 
         def callback(result):
             self.sendEvent(self.startEvent)
@@ -868,13 +876,18 @@ class PBDaemon(ZenDaemon, pb.Referenceable):
                 'zenoss_monitor': self.options.monitor,
                 'internal': True
             }
-            self._metrologyReporter = TwistedMetricReporter(self.options.writeStatistics, self.metricWriter(), daemonTags)
+            self._metrologyReporter = TwistedMetricReporter(
+                self.options.writeStatistics, self.metricWriter(), daemonTags,
+            )
             self._metrologyReporter.start()
+
+        d = self.connect()
+        d.addCallback(callback)
+        d.addErrback(twisted.python.log.err)
 
         if self.options.cycle:
             reactor.callWhenRunning(startStatsLoop)
-        d.addCallback(callback)
-        d.addErrback(twisted.python.log.err)
+
         reactor.run()
         if self._customexitcode:
             sys.exit(self._customexitcode)
