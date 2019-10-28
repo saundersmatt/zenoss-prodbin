@@ -13,7 +13,7 @@ from twisted.internet import defer, task
 
 from Products.ZenUtils.PBUtil import setKeepAlive
 
-from ._utils import getLoggerFrom
+from .utils import getLoggerFrom
 
 
 class ZenHubConnection(object):
@@ -23,16 +23,22 @@ class ZenHubConnection(object):
     fails for any reason.
     """
 
-    def __init__(self, log, service):
+    def __init__(self, log, clock, service):
         """Initialize a ZenHubConnection instance.
 
+        Note: this class assumes that service.startService() has been called.
+
         :param log: the logger
+        :param clock: Used for scheduling calls in the reactor
+        :type clock: IRreactorTime
         :param service: The connection manager
+        :type service: twisted.application.internet.ClientService
         """
+        self.__log = getLoggerFrom(log, self)
+        self.__reactor = clock
+        self.__service = service
         self.__stopping = False
         self.__pinger = None
-        self.__service = service
-        self.__log = getLoggerFrom(log, self)
         self.__handlers = {"connected": set(), "disconnected": set()}
         self.__connected = None
         self.__disconnected = None
@@ -122,7 +128,7 @@ class ZenHubConnection(object):
                 "Unable to report for work: (%s) %s",
                 type(ex).__name__, ex,
             )
-            self.__reactor.stop()
+            raise
         else:
             self.__log.info("Logged into ZenHub")
 

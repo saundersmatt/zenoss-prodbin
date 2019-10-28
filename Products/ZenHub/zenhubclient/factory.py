@@ -16,7 +16,7 @@ from twisted.internet.endpoints import clientFromString
 from Products.ZenHub import PB_PORT
 from Products.ZenHub.server import ZenPBClientFactory
 
-from ._connection import ZenHubConnection
+from .connection import ZenHubConnection
 
 DEFAULT_TIMEOUT = 30.0
 
@@ -50,6 +50,7 @@ class ZenHubClientFactory(object):
 
         :param log: The logger instance
         :param reactor: The twisted reactor to use
+        :type reactor: IReactorCore
         :param host: The host where zenhub runs
         :param port: The port zenhub listens on
         :param user: The user to log into zenhub as
@@ -73,13 +74,12 @@ class ZenHubClientFactory(object):
         endpointDescriptor = \
             "tcp:{host}:{port}".format(host=host, port=port)
         endpoint = clientFromString(reactor, endpointDescriptor)
-        return cls(reactor, endpoint, creds, ref, timeout)
+        return cls(endpoint, creds, ref, timeout)
 
-    def __init__(self, log, reactor, endpoint, credentials, ref, timeout):
+    def __init__(self, log, endpoint, credentials, ref, timeout):
         """Initialize a ZenHubClient instance.
 
         :param log: the logger
-        :type reactor: IReactorCore
         :param endpoint: Where zenhub is found
         :type endpoint: IStreamClientEndpoint
         :param credentials: Credentials to log into ZenHub.
@@ -89,7 +89,6 @@ class ZenHubClientFactory(object):
         :param float timeout: Seconds to wait before determining whether
             ZenHub is unresponsive.
         """
-        self.__reactor = reactor
         self.__endpoint = endpoint
         self.__credentials = credentials
         self.__ref = ref
@@ -97,15 +96,19 @@ class ZenHubClientFactory(object):
 
         self.__log = log
 
-    def connect(self):
-        """Start connecting to ZenHub.
+    def connect(self, clock):
+        """Connect to ZenHub.
 
-        Returns a ZenHubConnection object.
+        :param clock: Used for scheduling calls in the reactor
+        :type clock: IRreactorTime
+        :returns: ZenHubConnection
         """
         factory = ZenPBClientFactory()
         service = ClientService(
-            self.__endpoint, factory,
+            self.__endpoint,
+            factory,
             retryPolicy=backoffPolicy(initialDelay=0.5, factor=3.0),
+            clock=clock,
         )
         service.startService()
-        return ZenHubConnection(self.__log, service)
+        return ZenHubConnection(self.__log, clock, service)

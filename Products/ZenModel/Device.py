@@ -257,22 +257,18 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         )
 
     _relations = ManagedEntity._relations + (
-        ("deviceClass", ToOne(ToManyCont, "Products.ZenModel.DeviceClass",
-            "devices")),
-        ("perfServer", ToOne(ToMany, "Products.ZenModel.PerformanceConf",
-            "devices")),
-        ("location", ToOne(ToMany, "Products.ZenModel.Location", "devices")),
-        ("systems", ToMany(ToMany, "Products.ZenModel.System", "devices")),
-        ("groups", ToMany(ToMany, "Products.ZenModel.DeviceGroup", "devices")),
-        ("adminRoles", ToManyCont(ToOne,"Products.ZenModel.AdministrativeRole",
-            "managedObject")),
-        ('userCommands', ToManyCont(ToOne, 'Products.ZenModel.UserCommand',
-            'commandable')),
-        ("ipaddress", ToOne(ToOne, "Products.ZenModel.IpAddress", "manageDevice")),
+        ("deviceClass",  ToOne(ToManyCont, "Products.ZenModel.DeviceClass", "devices")),
+        ("perfServer",   ToOne(ToMany, "Products.ZenModel.PerformanceConf", "devices")),
+        ("location",     ToOne(ToMany, "Products.ZenModel.Location", "devices")),
+        ("systems",      ToMany(ToMany, "Products.ZenModel.System", "devices")),
+        ("groups",       ToMany(ToMany, "Products.ZenModel.DeviceGroup", "devices")),
+
+        ("adminRoles",   ToManyCont(ToOne,"Products.ZenModel.AdministrativeRole", "managedObject")),
+        ('userCommands', ToManyCont(ToOne, 'Products.ZenModel.UserCommand', 'commandable')),
+        ("ipaddress",    ToOne(ToOne, "Products.ZenModel.IpAddress", "manageDevice")),
         # unused:
-        ('monitors', ToMany(ToMany, 'Products.ZenModel.StatusMonitorConf',
-            'devices')),
-        )
+        ('monitors', ToMany(ToMany, 'Products.ZenModel.StatusMonitorConf', 'devices')),
+    )
 
     # Screen action bindings (and tab definitions)
     factory_type_information = (

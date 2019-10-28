@@ -117,11 +117,7 @@ class ZenHubWorker(ZCmdBase, pb.Referenceable):
         self.log.debug("establishing SIGUSR2 signal handler")
         signal.signal(signal.SIGUSR2, self.sighandler_USR2)
 
-        connection = self.__clientFactory.connect()
-        connection.notifyOnConnect(self._reportForWork)
-        self.__reactor.addSystemEventTrigger(
-            'before', 'shutdown', connection.disconnect,
-        )
+        self._start_zenhub_communication()
 
         self._metric_manager.start()
         self.__reactor.addSystemEventTrigger(
@@ -185,6 +181,29 @@ class ZenHubWorker(ZCmdBase, pb.Referenceable):
             self.reportStats()
         except Exception:
             pass
+
+    @defer.inlineCallbacks
+    def _start_zenhub_communication(self):
+        # Configure/initialize the ZenHub client
+        creds = UsernamePassword(
+            self.options.hubusername, self.options.hubpassword,
+        )
+        endpointDescriptor = "tcp:{host}:{port}".format(
+            host=self.options.hubhost, port=self.options.hubport,
+        )
+        endpoint = clientFromString(self.__reactor, endpointDescriptor)
+        factory = ZenHubClientFactory(
+            self.log, endpoint, creds, self,
+            self.options.hub_response_timeout,
+        )
+        connection = yield factory.connect()
+        self.__reactor.addSystemEventTrigger(
+            'before', 'shutdown', connection.disconnect,
+        )
+        yield connection.zenhub.callRemote(
+            "reportingForWork",
+            self, workerId=self.instanceId, worklistId=self.worklistId,
+        )
 
     @defer.inlineCallbacks
     def _reportForWork(self, zenhub):
