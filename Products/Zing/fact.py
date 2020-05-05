@@ -46,6 +46,7 @@ class MetadataKeys(object):
     COMPONENT_GROUPS_KEY = "component_groups"
     IMPACT_DS_ORG_KEY = "impact_ds_organizer"
     IMPACT_DS_IMPACTERS_KEY = "dynamic_service_impacters"
+    IMP_ORG_SERVICES_KEY = "imp_org_services"
     ZEN_SCHEMA_TAGS_KEY = "zen_schema_tags"
 
 class Fact(object):
