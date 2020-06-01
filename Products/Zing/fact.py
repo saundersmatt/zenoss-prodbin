@@ -1,10 +1,10 @@
 ##############################################################################
-# 
-# Copyright (C) Zenoss, Inc. 2018, all rights reserved.
-# 
+#
+# Copyright (C) Zenoss, Inc. 2018-2020, all rights reserved.
+#
 # This content is made available according to terms specified in
 # License.zenoss under the directory where your Zenoss product is installed.
-# 
+#
 ##############################################################################
 
 from .shortid import shortid
@@ -39,6 +39,7 @@ class FactKeys(object):
     SYSTEMS_KEY = "systems"
     PROD_STATE_KEY = "prod_state"
     DELETED_KEY = "_zen_deleted_entity"
+    ZEN_SCHEMA_TAGS_KEY = "zen_schema_tags"
 
 
 class Fact(object):
