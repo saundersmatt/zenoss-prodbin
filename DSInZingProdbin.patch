@@ -1,0 +1,390 @@
+diff --git a/Products/Zing/datamaps.py b/Products/Zing/datamaps.py
+index b6b2b2406..2fe5e972e 100644
+--- a/Products/Zing/datamaps.py
++++ b/Products/Zing/datamaps.py
+@@ -156,12 +156,17 @@ class ZingDatamapHandler(object):
+                 if f.is_valid():
+                     yield f
+                 # organizers and impact relationships facts for the component
+-                comp_uuid = f.metadata.get(ZFact.FactKeys.CONTEXT_UUID_KEY, "")
++                comp_uuid = f.metadata.get(ZFact.DimensionKeys.CONTEXT_UUID_KEY, "")
+                 if comp_uuid:
++                    comp_groups = []
++                    for component in device.getDeviceComponents():
++                        if component.getUUID() == comp_uuid:
++                            comp_groups = component.getComponentGroupNames()
++                            break
+                     # organizers fact for the component
+                     if comp_uuid not in zing_tx_state.already_generated_organizer_facts:
+-                        comp_meta = f.metadata.get(ZFact.FactKeys.META_TYPE_KEY, "")
+-                        comp_fact = ZFact.organizer_fact_from_device_component(device_organizers_fact, comp_uuid, comp_meta)
++                        comp_meta = f.metadata.get(ZFact.DimensionKeys.META_TYPE_KEY, "")
++                        comp_fact = ZFact.organizer_fact_from_device_component(device_organizers_fact, comp_uuid, comp_meta, comp_groups)
+                         if comp_fact.is_valid():
+                             zing_tx_state.already_generated_organizer_facts.add(comp_uuid)
+                             yield comp_fact
+@@ -202,10 +207,10 @@ class ZingDatamapHandler(object):
+     def fact_from_device(self, device):
+         f = ZFact.Fact()
+         ctx = ObjectMapContext(device)
+-        f.metadata[ZFact.FactKeys.CONTEXT_UUID_KEY] = ctx.uuid
+-        f.metadata[ZFact.FactKeys.META_TYPE_KEY] = ctx.meta_type
+-        f.metadata[ZFact.FactKeys.PLUGIN_KEY] = ctx.meta_type
+-        f.data[ZFact.FactKeys.NAME_KEY] = ctx.name
++        f.metadata[ZFact.DimensionKeys.CONTEXT_UUID_KEY] = ctx.uuid
++        f.metadata[ZFact.DimensionKeys.META_TYPE_KEY] = ctx.meta_type
++        f.metadata[ZFact.DimensionKeys.PLUGIN_KEY] = ctx.meta_type
++        f.data[ZFact.MetadataKeys.NAME_KEY] = ctx.name
+         return f
+ 
+     def fact_from_object_map(self, om, parent_device=None, relationship=None, context=None, dm_plugin=None):
+@@ -228,7 +233,7 @@ class ZingDatamapHandler(object):
+             f.metadata["relationship"] = relationship
+         plugin_name = getattr(om, PLUGIN_NAME_ATTR, None) or dm_plugin
+         if plugin_name:
+-            f.metadata[ZFact.FactKeys.PLUGIN_KEY] = plugin_name
++            f.metadata[ZFact.DimensionKeys.PLUGIN_KEY] = plugin_name
+ 
+         # Hack in whatever extra stuff we need.
+         om_context = (context or {}).get(om)
+@@ -236,10 +241,10 @@ class ZingDatamapHandler(object):
+             self.apply_extra_fields(om_context, f)
+ 
+         # FIXME temp solution until we are sure all zenpacks send the plugin
+-        if not f.metadata.get(ZFact.FactKeys.PLUGIN_KEY):
++        if not f.metadata.get(ZFact.DimensionKeys.PLUGIN_KEY):
+             log.warn("Found fact without plugin information: {}".format(f.metadata))
+-            if f.metadata.get(ZFact.FactKeys.META_TYPE_KEY):
+-                f.metadata[ZFact.FactKeys.PLUGIN_KEY] = f.metadata[ZFact.FactKeys.META_TYPE_KEY]
++            if f.metadata.get(ZFact.DimensionKeys.META_TYPE_KEY):
++                f.metadata[ZFact.DimensionKeys.PLUGIN_KEY] = f.metadata[ZFact.DimensionKeys.META_TYPE_KEY]
+         return f
+ 
+     def fact_from_incremental_map(self, idm, context=None):
+@@ -263,7 +268,7 @@ class ZingDatamapHandler(object):
+         if idm.relname:
+             f.metadata["relationship"] = idm.relname
+         if getattr(idm, PLUGIN_NAME_ATTR, None):
+-            f.metadata[ZFact.FactKeys.PLUGIN_KEY] = idm.plugin_name
++            f.metadata[ZFact.DimensionKeys.PLUGIN_KEY] = idm.plugin_name
+         try:
+             f.metadata["parent"] = idm.parent.getUUID()
+         except Exception:
+@@ -275,10 +280,10 @@ class ZingDatamapHandler(object):
+             self.apply_extra_fields(om_context, f)
+ 
+         # FIXME temp solution until we are sure all zenpacks send the plugin
+-        if not f.metadata.get(ZFact.FactKeys.PLUGIN_KEY):
++        if not f.metadata.get(ZFact.DimensionKeys.PLUGIN_KEY):
+             log.warn("Found fact without plugin information: {}".format(f.metadata))
+-            if f.metadata.get(ZFact.FactKeys.META_TYPE_KEY):
+-                f.metadata[ZFact.FactKeys.PLUGIN_KEY] = f.metadata[ZFact.FactKeys.META_TYPE_KEY]
++            if f.metadata.get(ZFact.DimensionKeys.META_TYPE_KEY):
++                f.metadata[ZFact.DimensionKeys.PLUGIN_KEY] = f.metadata[ZFact.DimensionKeys.META_TYPE_KEY]
+         return f
+ 
+     def facts_from_datamap(self, device, dm, context):
+@@ -308,16 +313,16 @@ class ZingDatamapHandler(object):
+         adapters are added to facts.
+ 
+         """
+-        f.metadata[ZFact.FactKeys.CONTEXT_UUID_KEY] = om_context.uuid
+-        f.metadata[ZFact.FactKeys.META_TYPE_KEY] = om_context.meta_type
+-        f.data[ZFact.FactKeys.NAME_KEY] = om_context.name
++        f.metadata[ZFact.DimensionKeys.CONTEXT_UUID_KEY] = om_context.uuid
++        f.metadata[ZFact.DimensionKeys.META_TYPE_KEY] = om_context.meta_type
++        f.data[ZFact.MetadataKeys.NAME_KEY] = om_context.name
+ 
+         if om_context.is_device_component:
+-            f.data[ZFact.FactKeys.ZEN_SCHEMA_TAGS_KEY] = "DeviceComponent"
++            f.data[ZFact.MetadataKeys.ZEN_SCHEMA_TAGS_KEY] = "DeviceComponent"
+         elif om_context.is_device:
+-            f.data[ZFact.FactKeys.ZEN_SCHEMA_TAGS_KEY] = "Device"
++            f.data[ZFact.MetadataKeys.ZEN_SCHEMA_TAGS_KEY] = "Device"
+             if om_context.mem_capacity is not None:
+-                f.data[ZFact.FactKeys.MEM_CAPACITY_KEY] = om_context.mem_capacity
++                f.data[ZFact.MetadataKeys.MEM_CAPACITY_KEY] = om_context.mem_capacity
+ 
+         if om_context.dimensions:
+             f.metadata.update(om_context.dimensions)
+diff --git a/Products/Zing/fact.py b/Products/Zing/fact.py
+index 22a8dab1d..0332e4f9d 100644
+--- a/Products/Zing/fact.py
++++ b/Products/Zing/fact.py
+@@ -25,12 +25,16 @@ log = logging.getLogger("zen.zing.fact")
+ ORGANIZERS_FACT_PLUGIN = 'zen_organizers'
+ DEVICE_INFO_FACT_PLUGIN = 'zen_device_info'
+ DELETION_FACT_PLUGIN = 'zen_deletion'
++DYNAMIC_SERVICE_FACT_PLUGIN = 'zen_impact_dynamic_service'
+ 
+ 
+-class FactKeys(object):
++class DimensionKeys(object):
+     CONTEXT_UUID_KEY = "contextUUID"
+     META_TYPE_KEY = "meta_type"
+     PLUGIN_KEY = "plugin"
++
++
++class MetadataKeys(object):
+     NAME_KEY = "name"
+     MEM_CAPACITY_KEY = "mem_capacity"
+     LOCATION_KEY = "location"
+@@ -40,27 +44,29 @@ class FactKeys(object):
+     PROD_STATE_KEY = "prod_state"
+     DELETED_KEY = "_zen_deleted_entity"
+     ZEN_SCHEMA_TAGS_KEY = "zen_schema_tags"
+-
++    COMPONENT_GROUPS_KEY = "component_groups"
++    IMPACT_DS_ORG_KEY = "impact_ds_organizer"
++    IMPACT_DS_IMPACTERS_KEY = "dynamic_service_impacters"
+ 
+ class Fact(object):
+     def __init__(self, f_id=None):
+         if not f_id:
+             f_id = shortid()
+         self.id = f_id
+-        self.metadata = {}
+-        self.data = {}
++        self.metadata = {}  # corresponds to "dimensions" in zing
++        self.data = {}  # corresponds to "metadata" in zing
+ 
+     def update(self, other):
+         self.data.update(other)
+ 
+     def is_valid(self):
+-        return self.metadata.get(FactKeys.CONTEXT_UUID_KEY) is not None
++        return self.metadata.get(DimensionKeys.CONTEXT_UUID_KEY) is not None
+ 
+     def set_context_uuid_from_object(self, obj):
+-        self.metadata[FactKeys.CONTEXT_UUID_KEY] = get_context_uuid(obj)
++        self.metadata[DimensionKeys.CONTEXT_UUID_KEY] = get_context_uuid(obj)
+ 
+     def set_meta_type_from_object(self, obj):
+-        self.metadata[FactKeys.META_TYPE_KEY] = obj.meta_type
++        self.metadata[DimensionKeys.META_TYPE_KEY] = obj.meta_type
+ 
+ 
+ def get_context_uuid(obj):
+@@ -74,9 +80,9 @@ def get_context_uuid(obj):
+ 
+ def deletion_fact(obj_uuid):
+     f = Fact()
+-    f.metadata[FactKeys.CONTEXT_UUID_KEY] = obj_uuid
+-    f.metadata[FactKeys.PLUGIN_KEY] = DELETION_FACT_PLUGIN
+-    f.data[FactKeys.DELETED_KEY] = True
++    f.metadata[DimensionKeys.CONTEXT_UUID_KEY] = obj_uuid
++    f.metadata[DimensionKeys.PLUGIN_KEY] = DELETION_FACT_PLUGIN
++    f.data[MetadataKeys.DELETED_KEY] = True
+     return f
+ 
+ 
+@@ -87,9 +93,9 @@ def device_info_fact(device):
+     f = Fact()
+     f.set_context_uuid_from_object(device)
+     f.set_meta_type_from_object(device)
+-    f.metadata[FactKeys.PLUGIN_KEY] = DEVICE_INFO_FACT_PLUGIN
+-    f.data[FactKeys.NAME_KEY] = device.titleOrId()
+-    f.data[FactKeys.PROD_STATE_KEY] = device.getProductionStateString()
++    f.metadata[DimensionKeys.PLUGIN_KEY] = DEVICE_INFO_FACT_PLUGIN
++    f.data[MetadataKeys.NAME_KEY] = device.titleOrId()
++    f.data[MetadataKeys.PROD_STATE_KEY] = device.getProductionStateString()
+     return f
+ 
+ 
+@@ -100,23 +106,24 @@ def organizer_fact_from_device(device):
+     device_fact = Fact()
+     device_fact.set_context_uuid_from_object(device)
+     device_fact.set_meta_type_from_object(device)
+-    device_fact.metadata[FactKeys.PLUGIN_KEY] = ORGANIZERS_FACT_PLUGIN
+-    device_fact.data[FactKeys.DEVICE_CLASS_KEY] = device.getDeviceClassName()
++    device_fact.metadata[DimensionKeys.PLUGIN_KEY] = ORGANIZERS_FACT_PLUGIN
++    device_fact.data[MetadataKeys.DEVICE_CLASS_KEY] = device.getDeviceClassName()
+     location = device.getLocationName()
+-    device_fact.data[FactKeys.LOCATION_KEY] = [location] if location else []
+-    device_fact.data[FactKeys.SYSTEMS_KEY] = device.getSystemNames()
+-    device_fact.data[FactKeys.GROUPS_KEY] = device.getDeviceGroupNames()
++    device_fact.data[MetadataKeys.LOCATION_KEY] = [location] if location else []
++    device_fact.data[MetadataKeys.SYSTEMS_KEY] = device.getSystemNames()
++    device_fact.data[MetadataKeys.GROUPS_KEY] = device.getDeviceGroupNames()
+     return device_fact
+ 
+ 
+-def organizer_fact_from_device_component(device_fact, comp_uuid, comp_meta_type):
++def organizer_fact_from_device_component(device_fact, comp_uuid, comp_meta_type, comp_groups):
+     """
+     Given a device component, generates its organizers fact
+     @param device_fact: organizers fact for device
+     """
+     comp_fact = copy.deepcopy(device_fact)
+-    comp_fact.metadata[FactKeys.CONTEXT_UUID_KEY] = comp_uuid
+-    comp_fact.metadata[FactKeys.META_TYPE_KEY] = comp_meta_type
++    comp_fact.metadata[DimensionKeys.CONTEXT_UUID_KEY] = comp_uuid
++    comp_fact.metadata[DimensionKeys.META_TYPE_KEY] = comp_meta_type
++    comp_fact.data[MetadataKeys.COMPONENT_GROUPS_KEY] = comp_groups
+     comp_fact.id = shortid()
+     return comp_fact
+ 
+@@ -150,6 +157,7 @@ def impact_relationships_fact_if_needed(tx_state, uuid, mark_as_generated=True):
+             tx_state.already_generated_impact_facts.add(uuid)
+     return impact_fact
+ 
++
+ class _FactEncoder(JSONEncoder):
+ 
+     def _tweak_data(self, data_in):
+diff --git a/Products/Zing/interfaces.py b/Products/Zing/interfaces.py
+index ab520fe79..00bdf159e 100644
+--- a/Products/Zing/interfaces.py
++++ b/Products/Zing/interfaces.py
+@@ -23,7 +23,7 @@ class IZingConnectorClient(Interface):
+         Sends a list of facts to zing-connector in batches. Returns boolean indicating if the requests succeeded
+         """
+ 
+-    def send_fact_generator_in_batches(self, fact_gen, batch_size):
++    def send_fact_generator_in_batches(self, fact_gen, batch_size, external_log=None):
+         """
+         Sends facts given by the passed generator to zing-connector. Returns boolean indicating if the requests succeeded
+         """
+diff --git a/Products/Zing/tests/test_datamaps.py b/Products/Zing/tests/test_datamaps.py
+index f3423f7e1..ca39978e8 100644
+--- a/Products/Zing/tests/test_datamaps.py
++++ b/Products/Zing/tests/test_datamaps.py
+@@ -85,6 +85,11 @@ class TestIncrementalDataMapHandler(TestCase):
+         t.target.getDeviceGroupNames.return_value = 'getDeviceGroupNames'
+         t.target.getLocationName.return_value = 'getLocationName'
+         t.target.getSystemNames.return_value = 'getSystemNames'
++        uuid = t.target.getUUID.return_value
++        components = []
++        for i in range(5):
++            components.append(Mock(getUUID=Mock(return_value=uuid), getComponentGroupNames=Mock(return_value='getComponentGroupNames')))
++        t.target.getDeviceComponents.return_value = components
+ 
+         # ApplyDataMap side-effects, current implementation expects this
+         for attr, value in t.idm.iteritems():
+@@ -120,7 +125,7 @@ class TestIncrementalDataMapHandler(TestCase):
+         )
+         t.assertEqual(
+             {
+-                ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
++                ZFact.DimensionKeys.PLUGIN_KEY: 'test_plugin_name',
+                 'meta_type': t.target.meta_type,
+                 'contextUUID': t.target.getUUID.return_value,
+                 'parent': t.parent.getUUID.return_value,
+@@ -138,12 +143,13 @@ class TestIncrementalDataMapHandler(TestCase):
+                 'groups': t.target.getDeviceGroupNames.return_value,
+                 'location': [t.target.getLocationName.return_value],
+                 'systems': t.target.getSystemNames.return_value,
++                'component_groups': 'getComponentGroupNames',
+             },
+             facts[1].data,
+         )
+         t.assertEqual(
+             {
+-                ZFact.FactKeys.PLUGIN_KEY: 'zen_organizers',
++                ZFact.DimensionKeys.PLUGIN_KEY: 'zen_organizers',
+                 'contextUUID': t.target.getUUID.return_value,
+                 'meta_type': t.target.meta_type,
+             },
+@@ -158,7 +164,7 @@ class TestIncrementalDataMapHandler(TestCase):
+         )
+         t.assertEqual(
+             {
+-                ZFact.FactKeys.PLUGIN_KEY: 'zen_device_info',
++                ZFact.DimensionKeys.PLUGIN_KEY: 'zen_device_info',
+                 'contextUUID': t.target.getUUID.return_value,
+                 'meta_type': t.target.meta_type,
+             },
+@@ -175,7 +181,12 @@ class TestIncrementalDataMapHandler(TestCase):
+         t.target.getDeviceGroupNames.return_value = 'getDeviceGroupNames'
+         t.target.getLocationName.return_value = 'getLocationName'
+         t.target.getSystemNames.return_value = 'getSystemNames'
+-
++        uuid = t.target.getUUID.return_value
++        components = []
++        for i in range(5):
++            components.append(
++                Mock(getUUID=Mock(return_value=uuid), getComponentGroupNames=Mock(return_value='getComponentGroupNames')))
++        t.target.getDeviceComponents.return_value = components
+         # ApplyDataMap side-effects, current implementation expects this
+         for attr, value in t.idm.iteritems():
+             setattr(t.target, attr, value)
+@@ -198,7 +209,7 @@ class TestIncrementalDataMapHandler(TestCase):
+ 
+         t.assertEqual(
+             {
+-                ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
++                ZFact.DimensionKeys.PLUGIN_KEY: 'test_plugin_name',
+                 'meta_type': t.target.meta_type,
+                 'contextUUID': t.target.getUUID.return_value,
+                 'relationship': t.relname,
+@@ -304,7 +315,7 @@ class TestZingDatamapHandler(TestCase):
+         )
+         t.assertEqual(
+             {
+-                ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
++                ZFact.DimensionKeys.PLUGIN_KEY: 'test_plugin_name',
+                 'meta_type': 'Device',
+                 'contextUUID': 'dummy_uuid',
+                 'dimension1': 'device d1',
+@@ -320,12 +331,13 @@ class TestZingDatamapHandler(TestCase):
+                 'groups': [],
+                 'location': [],
+                 'systems': [],
++                'component_groups': [],
+             },
+             facts[1].data,
+         )
+         t.assertEqual(
+             {
+-                ZFact.FactKeys.PLUGIN_KEY: 'zen_organizers',
++                ZFact.DimensionKeys.PLUGIN_KEY: 'zen_organizers',
+                 'contextUUID': 'dummy_uuid',
+                 'meta_type': 'Device',
+             },
+@@ -340,7 +352,7 @@ class TestZingDatamapHandler(TestCase):
+         )
+         t.assertEqual(
+             {
+-                ZFact.FactKeys.PLUGIN_KEY: 'zen_device_info',
++                ZFact.DimensionKeys.PLUGIN_KEY: 'zen_device_info',
+                 'contextUUID': 'dummy_uuid',
+                 'meta_type': 'Device',
+             },
+diff --git a/Products/Zing/zing_connector.py b/Products/Zing/zing_connector.py
+index 021008260..fb9a0b1a2 100644
+--- a/Products/Zing/zing_connector.py
++++ b/Products/Zing/zing_connector.py
+@@ -146,8 +146,10 @@ class ZingConnectorClient(object):
+     @param fact_gen: generator of facts to send to zing connector
+     @param batch_size: doh
+     """
+-    def send_fact_generator_in_batches(self, fact_gen, batch_size=DEFAULT_BATCH_SIZE):
+-        log.debug("Sending facts to zing-connector in batches of {}".format(batch_size))
++    def send_fact_generator_in_batches(self, fact_gen, batch_size=DEFAULT_BATCH_SIZE, external_log=None):
++        if external_log is None:
++            external_log = log
++        external_log.debug("Sending facts to zing-connector in batches of {}".format(batch_size))
+         ts = time.time()
+         count = 0
+         if not self.ping():
+@@ -165,8 +167,7 @@ class ZingConnectorClient(object):
+             success = success and self.send_facts(batch, ping=False)
+         if count > 0:
+             elapsed = time.time() - ts
+-            # FIXME set this to debug
+-            log.info("send_fact_generator_in_batches sent {} facts in {} seconds".format(count, elapsed))
++            external_log.debug("send_fact_generator_in_batches sent {} facts in {} seconds".format(count, elapsed))
+         return success == True
+ 
+     def ping(self):
+@@ -218,8 +219,8 @@ class ZingConnectorProxy(object):
+     def send_facts_in_batches(self, facts, batch_size=DEFAULT_BATCH_SIZE):
+         return self.client.send_facts_in_batches(facts, batch_size)
+ 
+-    def send_fact_generator_in_batches(self, fact_gen, batch_size=DEFAULT_BATCH_SIZE):
+-        return self.client.send_fact_generator_in_batches(fact_gen, batch_size)
++    def send_fact_generator_in_batches(self, fact_gen, batch_size=DEFAULT_BATCH_SIZE, external_log=None):
++        return self.client.send_fact_generator_in_batches(fact_gen, batch_size, external_log)
+ 
+     def ping(self):
+         return self.client.ping()
