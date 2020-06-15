@@ -607,6 +607,7 @@ Ext.define("Zenoss.DataSourceTreeGrid", {
                     items:[{
                         xtype: 'textfield',
                         fieldLabel: _t('Device Name'),
+                        id: 'testDevice',
                         ref: '../testDevice',
                         width: 300,
                         name: 'testDevice'
@@ -617,6 +618,7 @@ Ext.define("Zenoss.DataSourceTreeGrid", {
                     },{
                         xtype: 'button',
                         text: _t('Monitor'),
+                        id: 'testDeviceButton',
                         ref: '../testDeviceButton',
                         handler: me.monitorDataSource
                     }]});
@@ -628,8 +630,8 @@ Ext.define("Zenoss.DataSourceTreeGrid", {
             var cmdField = win.editForm.form.findField('commandTemplate');
             if (cmdField !== null) {
                 cmdField.addListener('dirtychange', function() {
-                    // win.testDeviceButto.disable();
-                    var devField = win.testDevice;
+                    Ext.getCmp('testDeviceButton').disable();
+                    var devField = Ext.getCmp('testDevice');
                     devField.setValue(_t("Save and reopen this dialog to test."));
                     devField.disable();
                 });
