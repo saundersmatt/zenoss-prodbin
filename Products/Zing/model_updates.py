@@ -112,12 +112,12 @@ class ZingObjectUpdateHandler(object):
             # TODO set this to debug
             log.info("Processing {} device info updates".format(len(tx_state.need_device_info_fact)))
             fact_generators.append(self._generate_facts(tx_state.need_device_info_fact,
-                                   tx_state.already_generated_device_info_facts))
+                                                        tx_state.already_generated_device_info_facts))
         if tx_state.need_organizers_fact:
             # TODO set this to debug
             log.info("Processing {} organizers updates".format(len(tx_state.need_organizers_fact)))
             fact_generators.append(self._generate_facts(tx_state.need_organizers_fact,
-                                   tx_state.already_generated_organizer_facts))
+                                                        tx_state.already_generated_organizer_facts))
         if tx_state.need_deletion_fact:
             # TODO set this to debug
             log.info("Processing {} deletion updates".format(len(tx_state.need_deletion_fact)))

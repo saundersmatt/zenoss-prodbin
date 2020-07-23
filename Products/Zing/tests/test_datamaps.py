@@ -85,11 +85,6 @@ class TestIncrementalDataMapHandler(TestCase):
         t.target.getDeviceGroupNames.return_value = 'getDeviceGroupNames'
         t.target.getLocationName.return_value = 'getLocationName'
         t.target.getSystemNames.return_value = 'getSystemNames'
-        uuid = t.target.getUUID.return_value
-        components = []
-        for i in range(5):
-            components.append(Mock(getUUID=Mock(return_value=uuid), getComponentGroupNames=Mock(return_value='getComponentGroupNames')))
-        t.target.getDeviceComponents.return_value = components
 
         # ApplyDataMap side-effects, current implementation expects this
         for attr, value in t.idm.iteritems():
@@ -125,7 +120,7 @@ class TestIncrementalDataMapHandler(TestCase):
         )
         t.assertEqual(
             {
-                ZFact.DimensionKeys.PLUGIN_KEY: 'test_plugin_name',
+                ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
                 'meta_type': t.target.meta_type,
                 'contextUUID': t.target.getUUID.return_value,
                 'parent': t.parent.getUUID.return_value,
@@ -143,13 +138,12 @@ class TestIncrementalDataMapHandler(TestCase):
                 'groups': t.target.getDeviceGroupNames.return_value,
                 'location': [t.target.getLocationName.return_value],
                 'systems': t.target.getSystemNames.return_value,
-                'component_groups': 'getComponentGroupNames',
             },
             facts[1].data,
         )
         t.assertEqual(
             {
-                ZFact.DimensionKeys.PLUGIN_KEY: 'zen_organizers',
+                ZFact.FactKeys.PLUGIN_KEY: 'zen_organizers',
                 'contextUUID': t.target.getUUID.return_value,
                 'meta_type': t.target.meta_type,
             },
@@ -164,7 +158,7 @@ class TestIncrementalDataMapHandler(TestCase):
         )
         t.assertEqual(
             {
-                ZFact.DimensionKeys.PLUGIN_KEY: 'zen_device_info',
+                ZFact.FactKeys.PLUGIN_KEY: 'zen_device_info',
                 'contextUUID': t.target.getUUID.return_value,
                 'meta_type': t.target.meta_type,
             },
@@ -181,12 +175,7 @@ class TestIncrementalDataMapHandler(TestCase):
         t.target.getDeviceGroupNames.return_value = 'getDeviceGroupNames'
         t.target.getLocationName.return_value = 'getLocationName'
         t.target.getSystemNames.return_value = 'getSystemNames'
-        uuid = t.target.getUUID.return_value
-        components = []
-        for i in range(5):
-            components.append(
-                Mock(getUUID=Mock(return_value=uuid), getComponentGroupNames=Mock(return_value='getComponentGroupNames')))
-        t.target.getDeviceComponents.return_value = components
+
         # ApplyDataMap side-effects, current implementation expects this
         for attr, value in t.idm.iteritems():
             setattr(t.target, attr, value)
@@ -209,7 +198,7 @@ class TestIncrementalDataMapHandler(TestCase):
 
         t.assertEqual(
             {
-                ZFact.DimensionKeys.PLUGIN_KEY: 'test_plugin_name',
+                ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
                 'meta_type': t.target.meta_type,
                 'contextUUID': t.target.getUUID.return_value,
                 'relationship': t.relname,
@@ -310,13 +299,12 @@ class TestZingDatamapHandler(TestCase):
                 'metadata4': {'key3': 'omcp1 value4', 'key4': 'omcp2 value4'},
                 'metadata5': 'omcp1 value5',
                 'metadata6': 'omcp2 value6',
-                'zen_schema_tags': 'Device',
             },
             facts[0].data,
         )
         t.assertEqual(
             {
-                ZFact.DimensionKeys.PLUGIN_KEY: 'test_plugin_name',
+                ZFact.FactKeys.PLUGIN_KEY: 'test_plugin_name',
                 'meta_type': 'Device',
                 'contextUUID': 'dummy_uuid',
                 'dimension1': 'device d1',
@@ -332,13 +320,12 @@ class TestZingDatamapHandler(TestCase):
                 'groups': [],
                 'location': [],
                 'systems': [],
-                'component_groups': [],
             },
             facts[1].data,
         )
         t.assertEqual(
             {
-                ZFact.DimensionKeys.PLUGIN_KEY: 'zen_organizers',
+                ZFact.FactKeys.PLUGIN_KEY: 'zen_organizers',
                 'contextUUID': 'dummy_uuid',
                 'meta_type': 'Device',
             },
@@ -353,7 +340,7 @@ class TestZingDatamapHandler(TestCase):
         )
         t.assertEqual(
             {
-                ZFact.DimensionKeys.PLUGIN_KEY: 'zen_device_info',
+                ZFact.FactKeys.PLUGIN_KEY: 'zen_device_info',
                 'contextUUID': 'dummy_uuid',
                 'meta_type': 'Device',
             },
