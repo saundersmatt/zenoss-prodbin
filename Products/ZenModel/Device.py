@@ -9,7 +9,7 @@
 
 """Device
 
-Base device (remote computer) class
+Base device (remote computer) class.
 """
 
 import cgi
@@ -26,6 +26,7 @@ from DateTime import DateTime
 from Globals import DTMLFile
 from ipaddr import IPAddress
 from OFS.CopySupport import CopyError
+from Products.PluginIndexes.FieldIndex.FieldIndex import FieldIndex
 from urllib import quote as urlquote
 from zenoss.protocols.protobufs.zep_pb2 import (
     SEVERITY_CRITICAL,
@@ -41,20 +42,17 @@ from zope.event import notify
 from zope.interface import implements
 
 from Products.Jobber.jobs import FacadeMethodJob
-from Products.PluginIndexes.FieldIndex.FieldIndex import FieldIndex
 from Products.ZenEvents.browser.EventPillsAndSummaries import getEventPillME
 from Products.ZenEvents.events2.proxy import EventProxy
 from Products.ZenEvents.ZenEventClasses import Status_Ping
 from Products.ZenMessaging.audit import audit
-from Products.ZenModel.Exceptions import DeviceExistsError, NoSnmp
-from Products.ZenModel.interfaces import IExpandedLinkProvider
 from Products.ZenRelations.RelSchema import ToManyCont, ToMany, ToOne
 from Products.ZenUtils.deprecated import deprecated
 from Products.ZenUtils.guid.interfaces import (
-    IGloballyIdentifiable, IGlobalIdentifier,
+    IGloballyIdentifiable,
+    IGlobalIdentifier,
 )
-from Products.ZenUtils import NetworkTree
-from Products.ZenUtils import Time
+from Products.ZenUtils import NetworkTree, Time
 from Products.ZenUtils.IpUtil import (
     checkip,
     getHostByName,
@@ -78,15 +76,17 @@ from Products.ZenUtils.Utils import (
 )
 from Products.ZenWidgets import messaging
 from Products.ZenWidgets.interfaces import IMessageSender
+from Products.Zuul import getFacade
 from Products.Zuul.catalog.events import IndexingEvent
 from Products.Zuul.catalog.indexable import DeviceIndexable
 from Products.Zuul.catalog.interfaces import IModelCatalogTool
-from Products.Zuul import getFacade
 
 from .AdministrativeRoleable import AdministrativeRoleable
 from .Commandable import Commandable
 from .DeviceHW import DeviceHW
 from .EventView import IEventView
+from .Exceptions import DeviceExistsError, NoSnmp
+from .interfaces import IExpandedLinkProvider
 from .Lockable import Lockable
 from .MaintenanceWindowable import MaintenanceWindowable
 from .ManagedEntity import ManagedEntity
@@ -139,25 +139,41 @@ def manage_createDevice(context, deviceName, devicePath="/Discovered",
     deviceName = context.prepId(deviceName)
     log.info("device name '%s' for ip '%s'", deviceName, manageIp)
     deviceClass = context.getDmdRoot("Devices").createOrganizer(devicePath)
-    device = deviceClass.createInstance(deviceName, performanceMonitor, manageIp)
+    device = deviceClass.createInstance(
+        deviceName, performanceMonitor, manageIp,
+    )
     device.setPerformanceMonitor(performanceMonitor)
     device.setManageIp(manageIp)
     device.manage_editDevice(
-                tag, serialNumber,
-                zSnmpCommunity, zSnmpPort, zSnmpVer,
-                rackSlot, productionState, comments,
-                hwManufacturer, hwProductName,
-                osManufacturer, osProductName,
-                locationPath, groupPaths, systemPaths,
-                performanceMonitor, priority, zProperties,
-                title)
+        tag,
+        serialNumber,
+        zSnmpCommunity,
+        zSnmpPort,
+        zSnmpVer,
+        rackSlot,
+        productionState,
+        comments,
+        hwManufacturer,
+        hwProductName,
+        osManufacturer,
+        osProductName,
+        locationPath,
+        groupPaths,
+        systemPaths,
+        performanceMonitor,
+        priority,
+        zProperties,
+        title,
+    )
     return device
 
 
 def findCommunity(context, ip, devicePath,
                   community="", port=None, version=None):
-    """
-    Find the SNMP community and version for an IP address using zSnmpCommunities.
+    """Return the SNMP community string associated with the arguments.
+
+    Find the SNMP community and version for an IP address using
+    zSnmpCommunities.
 
     @rtype: tuple of (community, port, version, device name)
     """
@@ -165,12 +181,16 @@ def findCommunity(context, ip, devicePath,
 
     devroot = context.getDmdRoot('Devices').createOrganizer(devicePath)
     communities = []
-    if community: communities.append(community)
+    if community:
+        communities.append(community)
     communities.extend(getattr(devroot, "zSnmpCommunities", []))
-    if not port: port = getattr(devroot, "zSnmpPort", 161)
+    if not port:
+        port = getattr(devroot, "zSnmpPort", 161)
     versions = ('v2c', 'v1')
-    if not version: version = getattr(devroot, 'zSnmpVer', None)
-    if version: versions = (version,)
+    if not version:
+        version = getattr(devroot, 'zSnmpVer', None)
+    if version:
+        versions = (version,)
     timeout = getattr(devroot, "zSnmpTimeout", 2)
     retries = getattr(devroot, "zSnmpTries", 2)
     session = SnmpSession(ip, timeout=timeout, port=port, retries=retries)
@@ -187,10 +207,12 @@ def findCommunity(context, ip, devicePath,
                 goodcommunity = session.community
                 goodversion = version
                 break
-            except POSError: raise
-            except Exception: pass #keep trying until we run out
+            except POSError:
+                raise
+            except Exception:
+                pass  # keep trying until we run out
         if goodcommunity:
-                break
+            break
     else:
         raise NoSnmp("No SNMP found for IP = %s" % ip)
     return (goodcommunity, port, goodversion, devname)
@@ -205,18 +227,20 @@ def manage_addDevice(context, id, REQUEST=None):
     context._setObject(serv.id, serv)
     if REQUEST is not None:
         # TODO: there is no "self"! Fix UI feedback code.
-        #messaging.IMessageSender(self).sendToBrowser(
-        #    'Device Added',
-        #    'Device %s has been created.' % id
-        #)
+        # messaging.IMessageSender(self).sendToBrowser(
+        #     'Device Added',
+        #     'Device %s has been created.' % id
+        # )
 
         # TODO: test this audits correctly. How is this called?
-        #uid = context._getOb(serv.id).getPrimaryId()
+        # uid = context._getOb(serv.id).getPrimaryId()
         audit('UI.Device.Add', serv, deviceClass=context)
-        REQUEST['RESPONSE'].redirect(context.absolute_url_path()+'/manage_main')
+        REQUEST['RESPONSE'].redirect(
+            context.absolute_url_path() + '/manage_main'
+        )
 
 
-addDevice = DTMLFile('dtml/addDevice',globals())
+addDevice = DTMLFile('dtml/addDevice', globals())
 
 
 class NoNetMask(Exception):
@@ -260,70 +284,98 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
     _temp_device = False
 
     _properties = ManagedEntity._properties + (
-        {'id':'title', 'type':'string', 'mode':'w'},
-        {'id':'manageIp', 'type':'string', 'mode':'w'},
-        {'id':'snmpAgent', 'type':'string', 'mode':'w'},
-        {'id':'snmpDescr', 'type':'string', 'mode':''},
-        {'id':'snmpOid', 'type':'string', 'mode':''},
-        {'id':'snmpContact', 'type':'string', 'mode':''},
-        {'id':'snmpSysName', 'type':'string', 'mode':''},
-        {'id':'snmpLocation', 'type':'string', 'mode':''},
-        {'id':'snmpLastCollection', 'type':'date', 'mode':''},
-        {'id':'snmpAgent', 'type':'string', 'mode':''},
-        {'id':'rackSlot', 'type':'string', 'mode':'w'},
-        {'id':'comments', 'type':'text', 'mode':'w'},
-        {'id':'sysedgeLicenseMode', 'type':'string', 'mode':''},
-        {'id':'priority', 'type':'int', 'mode':'w'},
-        )
+        {'id': 'title', 'type': 'string', 'mode': 'w'},
+        {'id': 'manageIp', 'type': 'string', 'mode': 'w'},
+        {'id': 'snmpAgent', 'type': 'string', 'mode': 'w'},
+        {'id': 'snmpDescr', 'type': 'string', 'mode': ''},
+        {'id': 'snmpOid', 'type': 'string', 'mode': ''},
+        {'id': 'snmpContact', 'type': 'string', 'mode': ''},
+        {'id': 'snmpSysName', 'type': 'string', 'mode': ''},
+        {'id': 'snmpLocation', 'type': 'string', 'mode': ''},
+        {'id': 'snmpLastCollection', 'type': 'date', 'mode': ''},
+        {'id': 'snmpAgent', 'type': 'string', 'mode': ''},
+        {'id': 'rackSlot', 'type': 'string', 'mode': 'w'},
+        {'id': 'comments', 'type': 'text', 'mode': 'w'},
+        {'id': 'sysedgeLicenseMode', 'type': 'string', 'mode': ''},
+        {'id': 'priority', 'type': 'int', 'mode': 'w'},
+    )
 
     _relations = ManagedEntity._relations + (
-        ("deviceClass", ToOne(ToManyCont, "Products.ZenModel.DeviceClass",
-            "devices")),
-        ("perfServer", ToOne(ToMany, "Products.ZenModel.PerformanceConf",
-            "devices")),
-        ("location", ToOne(ToMany, "Products.ZenModel.Location", "devices")),
-        ("systems", ToMany(ToMany, "Products.ZenModel.System", "devices")),
-        ("groups", ToMany(ToMany, "Products.ZenModel.DeviceGroup", "devices")),
-        ("adminRoles", ToManyCont(ToOne,"Products.ZenModel.AdministrativeRole",
-            "managedObject")),
-        ('userCommands', ToManyCont(ToOne, 'Products.ZenModel.UserCommand',
-            'commandable')),
-        ("ipaddress", ToOne(ToOne, "Products.ZenModel.IpAddress", "manageDevice")),
+        (
+            "deviceClass",
+            ToOne(ToManyCont, "Products.ZenModel.DeviceClass", "devices"),
+        ),
+        (
+            "perfServer",
+            ToOne(ToMany, "Products.ZenModel.PerformanceConf", "devices"),
+        ),
+        (
+            "location",
+            ToOne(ToMany, "Products.ZenModel.Location", "devices"),
+        ),
+        (
+            "systems",
+            ToMany(ToMany, "Products.ZenModel.System", "devices"),
+        ),
+        (
+            "groups",
+            ToMany(ToMany, "Products.ZenModel.DeviceGroup", "devices"),
+        ),
+        (
+            "adminRoles",
+            ToManyCont(
+                ToOne,
+                "Products.ZenModel.AdministrativeRole",
+                "managedObject",
+            ),
+        ),
+        (
+            'userCommands',
+            ToManyCont(ToOne, 'Products.ZenModel.UserCommand', 'commandable'),
+        ),
+        (
+            "ipaddress",
+            ToOne(ToOne, "Products.ZenModel.IpAddress", "manageDevice"),
+        ),
         # unused:
-        ('monitors', ToMany(ToMany, 'Products.ZenModel.StatusMonitorConf',
-            'devices')),
-        )
+        (
+            'monitors',
+            ToMany(ToMany, 'Products.ZenModel.StatusMonitorConf', 'devices'),
+        ),
+    )
 
     # Screen action bindings (and tab definitions)
     factory_type_information = (
         {
-            'id'             : 'Device',
-            'meta_type'      : 'Device',
-            'description'    : """Base class for all devices""",
-            'icon'           : 'Device_icon.gif',
-            'product'        : 'ZenModel',
-            'factory'        : 'manage_addDevice',
-            'immediate_view' : 'devicedetail',
-            'actions'        :
-            (
-                { 'id'            : 'events'
-                , 'name'          : 'Events'
-                , 'action'        : 'viewEvents'
-                , 'permissions'   : (ZEN_VIEW, )
+            'id': 'Device',
+            'meta_type': 'Device',
+            'description': "Base class for all devices",
+            'icon': 'Device_icon.gif',
+            'product': 'ZenModel',
+            'factory': 'manage_addDevice',
+            'immediate_view': 'devicedetail',
+            'actions': (
+                {
+                    'id': 'events',
+                    'name': 'Events',
+                    'action': 'viewEvents',
+                    'permissions': (ZEN_VIEW,),
                 },
-                { 'id'            : 'perfServer'
-                , 'name'          : 'Graphs'
-                , 'action'        : 'viewDevicePerformance'
-                , 'permissions'   : (ZEN_VIEW, )
+                {
+                    'id': 'perfServer',
+                    'name': 'Graphs',
+                    'action': 'viewDevicePerformance',
+                    'permissions': (ZEN_VIEW,),
                 },
-                { 'id'            : 'edit'
-                , 'name'          : 'Edit'
-                , 'action'        : 'editDevice'
-                , 'permissions'   : ("Change Device",)
+                {
+                    'id': 'edit',
+                    'name': 'Edit',
+                    'action': 'editDevice',
+                    'permissions': ("Change Device",),
                 },
-            )
-         },
-        )
+            ),
+        },
+    )
 
     security = ClassSecurityInfo()
 
@@ -336,7 +388,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         self._setObject(osObj.id, osObj)
         hw = DeviceHW()
         self._setObject(hw.id, hw)
-        #self.commandStatus = "Not Tested"
+        # self.commandStatus = "Not Tested"
         self._lastPollSnmpUpTime = ZenStatus(0)
         self._snmpLastCollection = 0
         self._lastChange = 0
@@ -383,8 +435,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         DEPRECATED
         """
         import warnings
-        warnings.warn('Device.getRRDTemplate is deprecated',
-                         DeprecationWarning)
+        warnings.warn('Device.getRRDTemplate is deprecated', DeprecationWarning)
         return ManagedEntity.getRRDTemplate(self)
 
     def getRRDTemplates(self):
@@ -467,7 +518,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         elif name == 'snmpLastCollection':
             return DateTime(self._snmpLastCollection)
         else:
-            raise AttributeError( name )
+            raise AttributeError(name)
 
     def _setPropValue(self, id, value):
         """
@@ -480,7 +531,6 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             self._snmpLastCollection = float(value)
         else:
             ManagedEntity._setPropValue(self, id, value)
-
 
     security.declareProtected(ZEN_MANAGE_DEVICE, 'applyDataMap')
     def applyDataMap(self, datamap, relname="", compname="", modname="", parentId=""):
@@ -502,13 +552,16 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             self.groups() +
             [self.location()] +
             [self.deviceClass()]
-            )
-        return [ aq_base(self).__of__(o.primaryAq()).getPhysicalPath() \
-                     for o in orgs if o is not None ]
+        )
+        return [
+            aq_base(self).__of__(o.primaryAq()).getPhysicalPath()
+            for o in orgs
+            if o is not None
+        ]
 
     def traceRoute(self, target, ippath=None):
-        """
-        Trace the route to target using our routing table.
+        """Trace the route to target using our routing table.
+
         Wrapper method of OperatingSystem.traceRoute
 
         @param target: Device name
@@ -518,20 +571,26 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         @return: IP Addresses
         @rtype: list
         """
-        if ippath is None: ippath=[]
+        if ippath is None:
+            ippath = []
         if isinstance(target, basestring):
             target = self.findDevice(target)
-            if not target: raise ValueError("Target %s not found in DMD" % target)
+            if not target:
+                raise ValueError("Target %s not found in DMD" % target)
         return self.os.traceRoute(target, ippath)
 
     def getMonitoredComponents(self, collector=None, type=None):
-        """
-        Return list of monitored DeviceComponents on this device.
+        """Return list of monitored DeviceComponents on this device.
+
         Wrapper method for getDeviceComponents
         """
-        components = self.getDeviceComponents(monitored=True,
-                                        collector=collector, type=type)
-        return filter(lambda x: x.getProductionState() >= x.zProdStateThreshold, components)
+        components = self.getDeviceComponents(
+            monitored=True, collector=collector, type=type,
+        )
+        return filter(
+            lambda x: x.getProductionState() >= x.zProdStateThreshold,
+            components,
+        )
 
     security.declareProtected(ZEN_VIEW, 'getReportableComponents')
     def getReportableComponents(self, collector=None, type=None):
@@ -544,7 +603,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         @permission: ZEN_VIEW
         @rtype: list
         """
-        return self.getMonitoredComponents(collector=collector, type=type);
+        return self.getMonitoredComponents(collector=collector, type=type)
 
     def _createComponentSearchPathIndex(self):
         indexName = 'getAllPaths'
@@ -557,13 +616,15 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     def _create_componentSearch(self):
         from Products.ZCatalog.ZCatalog import manage_addZCatalog
+
         manage_addZCatalog(self, "componentSearch", "componentSearch")
         zcat = self._getOb("componentSearch")
 
         cat = zcat._catalog
         cat.addIndex('meta_type', makeCaseInsensitiveFieldIndex('meta_type'))
-        cat.addIndex('getCollectors',
-            makeCaseInsensitiveKeywordIndex('getCollectors'))
+        cat.addIndex(
+            'getCollectors', makeCaseInsensitiveKeywordIndex('getCollectors'),
+        )
         cat.addIndex('id', makeCaseInsensitiveFieldIndex('id'))
         cat.addIndex('titleOrId', makeCaseInsensitiveFieldIndex('titleOrId'))
 
@@ -576,14 +637,14 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
         for c in self.getDeviceComponentsNoIndexGen():
             c.index_object()
-        # see ZEN-4087 double index the first component when creating this catalog
-        # otherwise it will not appear in the list of components.
+        # See ZEN-4087 double index the first component when creating this
+        # catalog. Otherwise it will not appear in the list of components.
         if len(self.componentSearch):
             self.componentSearch()[0].getObject().index_object()
 
     def getDeviceComponents_from_model_catalog(self, monitored=None, collector=None, type=None):
-        """
-        Return list of all DeviceComponents on this device extracted from model catalog. not used for now
+        """Return list of all DeviceComponents on this device extracted from
+        model catalog. not used for now
 
         @type monitored: boolean
         @type collector: string
@@ -591,7 +652,10 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         @permission: ZEN_VIEW
         @rtype: list
         """
-        query = {"objectImplements": "Products.ZenModel.DeviceComponent.DeviceComponent"}
+        query = {
+            "objectImplements":
+                "Products.ZenModel.DeviceComponent.DeviceComponent",
+        }
         if collector is not None:
             query['collectors'] = collector
         if monitored is not None:
@@ -603,7 +667,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         search_results = cat.search(query=query)
         results = []
         if search_results.total > 0:
-            results = [ brain.getObject() for brain in search_results.results ]
+            results = [brain.getObject() for brain in search_results.results]
         return results
 
     security.declareProtected(ZEN_VIEW, 'getDeviceComponents')
@@ -641,16 +705,17 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         from DeviceComponent import DeviceComponent
         for baseObject in (self, self.os, self.hw):
             for rel in baseObject.getRelationships():
-                if rel.meta_type != "ToManyContRelationship": continue
+                if rel.meta_type != "ToManyContRelationship":
+                    continue
                 for obj in rel():
-                    if not isinstance(obj, DeviceComponent): break
+                    if not isinstance(obj, DeviceComponent):
+                        break
                     for subComp in obj.getSubComponentsNoIndexGen():
                         yield subComp
                     yield obj
 
     def getSnmpConnInfo(self):
-        """
-        Returns an object containing SNMP Connection Info
+        """Returns an object containing SNMP Connection Info
 
         @rtype: SnmpConnInfo object
         """
@@ -658,8 +723,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return SnmpConnInfo(self)
 
     def getHWManufacturerName(self):
-        """
-        DEPRECATED - Return the hardware manufacturer name of this device.
+        """DEPRECATED - Return the hardware manufacturer name of this device.
 
         @rtype: string
         @todo: Remove this method and remove the call from testDevice.py
@@ -667,16 +731,14 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return self.hw.getManufacturerName()
 
     def getHWProductName(self):
-        """
-        Return the hardware product name of this device.
+        """Return the hardware product name of this device.
 
         @rtype: string
         """
         return self.hw.getProductName()
 
     def getHWProductClass(self):
-        """
-        Return the hardware product class of this device.
+        """Return the hardware product class of this device.
 
         @rtype: string
         """
@@ -685,8 +747,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             return cls.titleOrId()
 
     def getHWProductKey(self):
-        """
-        DEPRECATED - Return the productKey of the device hardware.
+        """DEPRECATED - Return the productKey of the device hardware.
 
         @rtype: string
         @todo: Remove this method and remove the call from testDevice.py
@@ -694,8 +755,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return self.hw.getProductKey()
 
     def getOSManufacturerName(self):
-        """
-        DEPRECATED - Return the OS manufacturer name of this device.
+        """DEPRECATED - Return the OS manufacturer name of this device.
 
         @rtype: string
         @todo: Remove this method and remove the call from testDevice.py
@@ -703,8 +763,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return self.os.getManufacturerName()
 
     def getOSProductName(self):
-        """
-        DEPRECATED - Return the OS product name of this device.
+        """DEPRECATED - Return the OS product name of this device.
 
         @rtype: string
         @todo: Remove this method and remove the call from testDevice.py
@@ -712,8 +771,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return self.os.getProductName()
 
     def getOSProductKey(self):
-        """
-        DEPRECATED - Return the productKey of the device OS.
+        """DEPRECATED - Return the productKey of the device OS.
 
         @rtype: string
         @todo: Remove this method and remove the call from testDevice.py
@@ -722,14 +780,12 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setOSProductKey')
     def setOSProductKey(self, prodKey, manufacturer=None):
-        """
-        Set the productKey of the device OS.
+        """Set the productKey of the device OS.
         """
         self.os.setProductKey(prodKey, manufacturer)
 
     def getHWTag(self):
-        """
-        DEPRECATED - Return the tag of the device HW.
+        """DEPRECATED - Return the tag of the device HW.
 
         @rtype: string
         @todo: remove this method and remove the call from testDevice.py
@@ -738,28 +794,24 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setHWTag')
     def setHWTag(self, assettag):
-        """
-        Set the asset tag of the device hardware.
+        """Set the asset tag of the device hardware.
         """
         self.hw.tag = assettag
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setHWProductKey')
     def setHWProductKey(self, prodKey, manufacturer=None):
-        """
-        Set the productKey of the device hardware.
+        """Set the productKey of the device hardware.
         """
         self.hw.setProductKey(prodKey, manufacturer)
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setHWSerialNumber')
     def setHWSerialNumber(self, number):
-        """
-        Set the hardware serial number.
+        """Set the hardware serial number.
         """
         self.hw.serialNumber = number
 
     def getHWSerialNumber(self):
-        """
-        DEPRECATED - Return the hardware serial number.
+        """DEPRECATED - Return the hardware serial number.
 
         @rtype: string
         @todo: Remove this method and remove the call from testDevice.py
@@ -767,35 +819,34 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return self.hw.serialNumber
 
     def followNextHopIps(self):
-        """
-        Return the ips that our indirect routs point to which aren't currently
-        connected to devices.
+        """Return the ips that our indirect routs point to which aren't
+        currently connected to devices.
 
         @todo: Can be moved to zendisc.py
         """
         ips = []
         for r in self.os.routes():
             ipobj = r.nexthop()
-            #if ipobj and not ipobj.device():
-            if ipobj: ips.append(ipobj.id)
+            # if ipobj and not ipobj.device():
+            if ipobj:
+                ips.append(ipobj.id)
         return ips
 
     security.declareProtected(ZEN_VIEW, 'getLocationName')
     def getLocationName(self):
-        """
-        Return the location name. i.e. "Rack" from /Locations/Loc/SubLoc/Rack
+        """Return the location name.
+
+        I.e. "Rack" from /Locations/Loc/SubLoc/Rack
 
         @rtype: string
         @permission: ZEN_VIEW
         """
         loc = self.location()
-        if loc: return loc.getOrganizerName()
-        return ""
+        return loc.getOrganizerName() if loc else ""
 
     security.declareProtected(ZEN_VIEW, 'getLocationLink')
     def getLocationLink(self):
-        """
-        Return a link to the device's location.
+        """Return a link to the device's location.
 
         @rtype: string
         @permission: ZEN_VIEW
@@ -811,8 +862,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getSystemNames')
     def getSystemNames(self):
-        """
-        Return the system names for this device
+        """Return the system names for this device.
 
         @rtype: list
         @permission: ZEN_VIEW
@@ -821,8 +871,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getSystemNamesString')
     def getSystemNamesString(self, sep=', '):
-        """
-        Return the system names for this device as a string
+        """Return the system names for this device as a string.
 
         @rtype: string
         @permission: ZEN_VIEW
@@ -831,8 +880,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getDeviceGroupNames')
     def getDeviceGroupNames(self):
-        """
-        Return the device group names for this device
+        """Return the device group names for this device.
 
         @rtype: list
         @permission: ZEN_VIEW
@@ -841,8 +889,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getPerformanceServer')
     def getPerformanceServer(self):
-        """
-        Return the device performance server
+        """Return the device performance server.
 
         @rtype: PerformanceMonitor
         @permission: ZEN_VIEW
@@ -851,15 +898,13 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getPerformanceServerName')
     def getPerformanceServerName(self):
-        """
-        Return the device performance server name
+        """Return the device performance server name.
 
         @rtype: string
         @permission: ZEN_VIEW
         """
         cr = self.perfServer()
-        if cr: return cr.getId()
-        return ''
+        return cr.getId() if cr else ""
 
     def getNetworkRoot(self, version=None):
         """Return the network root object
@@ -868,8 +913,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getLastChange')
     def getLastChange(self):
-        """
-        Return DateTime of last change detected on this device.
+        """Return DateTime of last change detected on this device.
 
         @rtype: DateTime
         @permission: ZEN_VIEW
@@ -878,8 +922,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getLastChangeString')
     def getLastChangeString(self):
-        """
-        Return date string of last change detected on this device.
+        """Return date string of last change detected on this device.
 
         @rtype: string
         @permission: ZEN_VIEW
@@ -888,8 +931,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getSnmpLastCollection')
     def getSnmpLastCollection(self):
-        """
-        Return DateTime of last SNMP collection on this device.
+        """Return DateTime of last SNMP collection on this device.
 
         @rtype: DateTime
         @permission: ZEN_VIEW
@@ -898,22 +940,23 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getSnmpLastCollectionString')
     def getSnmpLastCollectionString(self):
-        """
-        Return date string of last SNMP collection on this device.
+        """Return date string of last SNMP collection on this device.
 
         @rtype: string
         @permission: ZEN_VIEW
         """
         if self._snmpLastCollection:
-            return Time.LocalDateTimeSecsResolution(float(self._snmpLastCollection))
+            return Time.LocalDateTimeSecsResolution(
+                float(self._snmpLastCollection),
+            )
         return "Not Modeled"
 
     def _sanitizeIPaddress(self, ip):
         try:
             if not ip:
-                pass # Forcing a reset with a blank IP
+                pass  # Forcing a reset with a blank IP
             elif ip.find("/") > -1:
-                ipWithoutNetmask, netmask = ip.split("/",1)
+                ipWithoutNetmask, netmask = ip.split("/", 1)
                 checkip(ipWithoutNetmask)
                 # Also check for valid netmask if they give us one
                 if maskToBits(netmask) is None:
@@ -943,8 +986,8 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_ADMIN_DEVICE, 'setManageIp')
     def setManageIp(self, ip="", REQUEST=None):
-        """
-        Set the manage IP, if IP is not passed perform DNS lookup.
+        """Set the manage IP, if IP is not passed perform DNS lookup.
+
         If there is an error with the IP address format, the IP address
         will be reset to the result of a DNS lookup.
 
@@ -956,7 +999,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         origip = ip
         ip = self._sanitizeIPaddress(ip)
 
-        if not ip: # What if they put in a DNS name?
+        if not ip:  # What if they put in a DNS name?
             try:
                 ip = getHostByName(origip)
                 if ip == '0.0.0.0':
@@ -971,27 +1014,33 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             except socket.error:
                 ip = ''
                 if origip:
-                    message = ("%s is an invalid IP address, "
-                      "and no appropriate IP could"
-                      " be found via DNS for %s") % (origip, self.id)
+                    message = (
+                        "%s is an invalid IP address, and no appropriate IP "
+                        "could be found via DNS for %s"
+                    ) % (origip, self.id)
                     log.warn(message)
                 else:
-                    message = "DNS lookup of '%s' failed to return an IP" % \
-                               self.id
+                    message = (
+                        "DNS lookup of '%s' failed to return an IP" % self.id
+                    )
 
         if ip:
             if self._isDuplicateIp(ip):
                 message = "The IP address %s is already assigned" % ip
                 log.warn(message)
-
             else:
                 self.manageIp = ip
-                notify(IndexingEvent(self, ('decimal_ipAddress', 'text_ipAddress'), True))
-                log.info("%s's IP address has been set to %s.",
-                         self.id, ip)
-                #Create a new IpAddress object from manageIp under the Network
+                notify(
+                    IndexingEvent(
+                        self, ('decimal_ipAddress', 'text_ipAddress'), True,
+                    ),
+                )
+                log.info("%s's IP address has been set to %s.", self.id, ip)
+                # Create a new IpAddress object from manageIp under the Network
                 ipWithoutNetmask, netmask = ipAndMaskFromIpMask(ip)
-                ipobj = self.getNetworkRoot().createIp(ipWithoutNetmask, netmask)
+                ipobj = self.getNetworkRoot().createIp(
+                    ipWithoutNetmask, netmask,
+                )
                 self.ipaddress.addRelation(ipobj)
                 notify(IndexingEvent(ipobj))
                 if REQUEST:
@@ -1001,8 +1050,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getManageIp')
     def getManageIp(self):
-        """
-        Return the management ip for this device.
+        """Return the management ip for this device.
 
         @rtype: string
         @permission: ZEN_VIEW
@@ -1010,8 +1058,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return self.manageIp
 
     def getManageIpObj(self):
-        """
-        DEPRECATED - Return the management ipobject for this device.
+        """DEPRECATED - Return the management ipobject for this device.
 
         @rtype: IpAddress
         @todo: This method may not be called anywhere, remove it.
@@ -1021,19 +1068,18 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getManageInterface')
     def getManageInterface(self):
-        """
-        Return the management interface of a device based on its manageIp.
+        """Return the management interface of a device based on its manageIp.
 
         @rtype: IpInterface
         @permission: ZEN_VIEW
         """
         ipobj = self.Networks.findIp(self.manageIp)
-        if ipobj: return ipobj.interface()
+        if ipobj:
+            return ipobj.interface()
 
     security.declareProtected(ZEN_VIEW, 'uptimeStr')
     def uptimeStr(self):
-        """
-        Return the SNMP uptime
+        """Return the SNMP uptime.
 
         @rtype: string
         @permission: ZEN_VIEW
@@ -1044,17 +1090,15 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             return "Unknown"
         elif ut == 0:
             return "0d:0h:0m:0s"
-        ut = float(ut)/100.
-        days = int(ut/86400)
-        hour = int((ut%86400)/3600)
-        mins = int((ut%3600)/60)
-        secs = int(ut%60)
-        return "%02dd:%02dh:%02dm:%02ds" % (
-            days, hour, mins, secs)
+        ut = float(ut) / 100.
+        days = int(ut / 86400)
+        hour = int((ut % 86400) / 3600)
+        mins = int((ut % 3600) / 60)
+        secs = int(ut % 60)
+        return "%02dd:%02dh:%02dm:%02ds" % (days, hour, mins, secs)
 
     def getPeerDeviceClassNames(self):
-        """
-        Build a list of all device paths that have the python class pyclass
+        """Return all device paths that have the python class pyclass.
 
         @rtype: list
         """
@@ -1067,15 +1111,18 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'manage_snmpCommunity')
     def manage_snmpCommunity(self):
-        """
-        Reset the snmp community using the zSnmpCommunities variable.
+        """Reset the snmp community using the zSnmpCommunities variable.
 
         @permission: ZEN_CHANGE_DEVICE
         """
         try:
-            zSnmpCommunity, zSnmpPort, zSnmpVer, snmpname = \
-                findCommunity(self, self.manageIp, self.getDeviceClassPath(),
-                            port=self.zSnmpPort, version=self.zSnmpVer)
+            zSnmpCommunity, zSnmpPort, zSnmpVer, snmpname = findCommunity(
+                self,
+                self.manageIp,
+                self.getDeviceClassPath(),
+                port=self.zSnmpPort,
+                version=self.zSnmpVer,
+            )
         except NoSnmp:
             pass
         else:
@@ -1086,14 +1133,15 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             if self.zSnmpVer != zSnmpVer:
                 self.setZenProperty("zSnmpVer", zSnmpVer)
 
-    def setProductInfo(self, hwManufacturer="", hwProductName="",
-                          osManufacturer="", osProductName=""):
+    def setProductInfo(self, hwManufacturer="", hwProductName="", osManufacturer="", osProductName=""):
         if hwManufacturer and hwProductName:
             # updateDevice uses the sentinel value "_no_change" to indicate
             # that we really don't want change this value
             if hwManufacturer != "_no_change" and hwProductName != "_no_change":
-                log.info("setting hardware manufacturer to %r productName to %r"
-                                % (hwManufacturer, hwProductName))
+                log.info(
+                    "setting hardware manufacturer to %r productName to %r",
+                    hwManufacturer, hwProductName,
+                )
                 self.hw.setProduct(hwProductName, hwManufacturer)
         else:
             self.hw.removeProductClass()
@@ -1102,18 +1150,20 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             # updateDevice uses the sentinel value "_no_change" to indicate
             # that we really don't want change this value
             if osManufacturer != "_no_change" and osProductName != "_no_change":
-                log.info("setting os manufacturer to %r productName to %r"
-                                % (osManufacturer, osProductName))
+                log.info(
+                    "setting os manufacturer to %r productName to %r",
+                    osManufacturer, osProductName,
+                )
                 self.os.setProduct(osProductName, osManufacturer, isOS=True)
         else:
             self.os.removeProductClass()
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'updateDevice')
-    def updateDevice(self,**kwargs):
-        """
-        Update the device relation and attributes, if passed. If any parameter
-        is not passed it will not be updated; the value of any unpassed device
-        propeties will remain the same.
+    def updateDevice(self, **kwargs):
+        """Update the device relation and attributes, if passed.
+
+        If any parameter is not passed it will not be updated; the value of
+        any unpassed device propeties will remain the same.
 
         @permission: ZEN_CHANGE_DEVICE
         Keyword arguments:
@@ -1158,59 +1208,67 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             zProperties = {}
 
         # override any snmp properties that may be in zProperties
-        zpropUpdate = dict((name, kwargs[name]) for name in ('zSnmpCommunity', 'zSnmpPort', 'zSnmpVer')
-                                                    if name in kwargs)
-        zProperties.update(zpropUpdate)
+        zProperties.update({
+            name: kwargs[name]
+            for name in ('zSnmpCommunity', 'zSnmpPort', 'zSnmpVer')
+            if name in kwargs
+        })
 
         # apply any zProperties to self
         for prop, value in zProperties.items():
             if value is not None and value != "":
-                # setZenProperty doesn't set it if it's the same value, so no
-                # need to check here
+                # setZenProperty doesn't set it if it's the same value,
+                # so no need to check here.
                 self.setZenProperty(prop, value)
 
         if 'rackSlot' in kwargs and kwargs['rackSlot'] != self.rackSlot:
             # rackSlot may be a string or integer
-            log.info("setting rackSlot to %r" % kwargs["rackSlot"])
+            log.info("setting rackSlot to %r", kwargs["rackSlot"])
             self.rackSlot = kwargs["rackSlot"]
 
         if 'productionState' in kwargs:
-            # Always set production state, but don't log it if it didn't change.
+            # Always set production state,
+            # but don't log it if it didn't change.
             if kwargs['productionState'] != self.getProductionState():
-                prodStateName = self.dmd.convertProdState(int(kwargs['productionState']))
-                log.info("setting productionState to %s" % prodStateName)
+                prodStateName = self.dmd.convertProdState(
+                    int(kwargs['productionState']),
+                )
+                log.info("setting productionState to %s", prodStateName)
             self.setProdState(kwargs["productionState"])
 
         if 'priority' in kwargs and int(kwargs['priority']) != self.priority:
             priorityName = self.dmd.convertPriority(kwargs['priority'])
-            log.info("setting priority to %s" % priorityName)
+            log.info("setting priority to %s", priorityName)
             self.setPriority(kwargs["priority"])
 
         if 'comments' in kwargs and kwargs['comments'] != self.comments:
-            log.info("setting comments to %r" % kwargs["comments"])
+            log.info("setting comments to %r", kwargs["comments"])
             self.comments = kwargs["comments"]
 
-        self.setProductInfo(hwManufacturer=kwargs.get("hwManufacturer","_no_change"),
-                            hwProductName=kwargs.get("hwProductName","_no_change"),
-                            osManufacturer=kwargs.get("osManufacturer","_no_change"),
-                            osProductName=kwargs.get("osProductName","_no_change"))
+        self.setProductInfo(
+            hwManufacturer=kwargs.get("hwManufacturer", "_no_change"),
+            hwProductName=kwargs.get("hwProductName", "_no_change"),
+            osManufacturer=kwargs.get("osManufacturer", "_no_change"),
+            osProductName=kwargs.get("osProductName", "_no_change"),
+        )
 
         if kwargs.get("locationPath", False):
-            log.info("setting location to %r" % kwargs["locationPath"])
+            log.info("setting location to %r", kwargs["locationPath"])
             self.setLocation(kwargs["locationPath"])
 
-        if kwargs.get("groupPaths",False):
-            log.info("setting group %r" % kwargs["groupPaths"])
+        if kwargs.get("groupPaths", False):
+            log.info("setting group %r", kwargs["groupPaths"])
             self.setGroups(kwargs["groupPaths"])
 
-        if kwargs.get("systemPaths",False):
-            log.info("setting system %r" % kwargs["systemPaths"])
+        if kwargs.get("systemPaths", False):
+            log.info("setting system %r", kwargs["systemPaths"])
             self.setSystems(kwargs["systemPaths"])
 
-        if 'performanceMonitor' in kwargs and \
-            kwargs["performanceMonitor"] != self.getPerformanceServerName():
-            log.info("setting performance monitor to %r" \
-                     % kwargs["performanceMonitor"])
+        if 'performanceMonitor' in kwargs and kwargs["performanceMonitor"] != self.getPerformanceServerName():
+            log.info(
+                "setting performance monitor to %r",
+                kwargs["performanceMonitor"],
+            )
             self.setPerformanceMonitor(kwargs["performanceMonitor"])
 
         self.setLastChange()
@@ -1227,11 +1285,12 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
                 performanceMonitor="localhost", priority=3,
                 zProperties=None, title=None, REQUEST=None):
         """
-        Edit the device relation and attributes. This method will update device
-        properties because of the default values that are passed. Calling this
-        method using a **kwargs dict will result in default values being set for
-        many device properties. To update only a subset of these properties use
-        updateDevice(**kwargs).
+        Edit the device relation and attributes.
+
+        This method will update device properties because of the default
+        values that are passed.  Calling this method using a **kwargs dict
+        will result in default values being set for many device properties.
+        To update only a subset of these properties use updateDevice(**kwargs).
 
         @param locationPath: path to a Location
         @type locationPath: string
@@ -1244,14 +1303,27 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         @permission: ZEN_CHANGE_DEVICE
         """
         self.updateDevice(
-                tag=tag, serialNumber=serialNumber,
-                zSnmpCommunity=zSnmpCommunity, zSnmpPort=zSnmpPort, zSnmpVer=zSnmpVer,
-                rackSlot=rackSlot, productionState=productionState, comments=comments,
-                hwManufacturer=hwManufacturer, hwProductName=hwProductName,
-                osManufacturer=osManufacturer, osProductName=osProductName,
-                locationPath=locationPath, groupPaths=groupPaths, systemPaths=systemPaths,
-                performanceMonitor=performanceMonitor, priority=priority,
-                zProperties=zProperties, title=title, REQUEST=REQUEST)
+            tag=tag,
+            serialNumber=serialNumber,
+            zSnmpCommunity=zSnmpCommunity,
+            zSnmpPort=zSnmpPort,
+            zSnmpVer=zSnmpVer,
+            rackSlot=rackSlot,
+            productionState=productionState,
+            comments=comments,
+            hwManufacturer=hwManufacturer,
+            hwProductName=hwProductName,
+            osManufacturer=osManufacturer,
+            osProductName=osProductName,
+            locationPath=locationPath,
+            groupPaths=groupPaths,
+            systemPaths=systemPaths,
+            performanceMonitor=performanceMonitor,
+            priority=priority,
+            zProperties=zProperties,
+            title=title,
+            REQUEST=REQUEST,
+        )
         if REQUEST:
             from Products.ZenUtils.Time import SaveMessage
             IMessageSender(self).sendToBrowser("Saved", SaveMessage())
@@ -1263,15 +1335,13 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setTitle')
     def setTitle(self, newTitle):
-        """
-        Changes the title to newTitle and reindexes the object
+        """Changes the title to newTitle and reindexes the object.
         """
         super(Device, self).setTitle(newTitle)
         notify(IndexingEvent(self, ('name',), True))
 
     def monitorDevice(self):
-        """
-        Returns true if the device production state >= zProdStateThreshold.
+        """Returns true if the device production state >= zProdStateThreshold.
 
         @rtype: boolean
         """
@@ -1279,8 +1349,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
                 and not self.renameInProgress)
 
     def snmpMonitorDevice(self):
-        """
-        Returns true if the device is subject to SNMP monitoring
+        """Returns true if the device is subject to SNMP monitoring.
 
         @rtype: boolean
         """
@@ -1289,24 +1358,21 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
                 and not self.zSnmpMonitorIgnore)
 
     def getPriority(self):
-        """
-        Return the numeric device priority.
+        """Return the numeric device priority.
 
         @rtype: int
         """
         return self.priority
 
     def getPriorityString(self):
-        """
-        Return the device priority as a string.
+        """Return the device priority as a string.
 
         @rtype: string
         """
         return str(self.convertPriority(self.priority))
 
     def getPingStatusString(self):
-        """
-        Return the pingStatus as a string
+        """Return the pingStatus as a string.
 
         @rtype: string
         """
@@ -1316,8 +1382,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return "Down"
 
     def getSnmpStatusString(self):
-        """
-        Return the snmpStatus as a string
+        """Return the snmpStatus as a string.
 
         @rtype: string
         """
@@ -1328,8 +1393,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE_PRODSTATE, 'setProdState')
     def setProdState(self, state, maintWindowChange=False, REQUEST=None):
-        """
-        Set the device's production state.
+        """Set the device's production state.
 
         @parameter state: new production state
         @type state: int
@@ -1338,7 +1402,9 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         @permission: ZEN_CHANGE_DEVICE
         """
         # Set production state on all components that inherit from this device
-        ret = super(Device, self).setProdState(state, maintWindowChange, REQUEST)
+        ret = super(Device, self).setProdState(
+            state, maintWindowChange, REQUEST,
+        )
         self._p_changed = True
         if REQUEST:
             audit('UI.Device.Edit', self, productionState=state,
@@ -1347,8 +1413,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setPriority')
     def setPriority(self, priority, REQUEST=None):
-        """
-        Set the device's priority
+        """Set the device's priority.
 
         @type priority: int
         @permission: ZEN_CHANGE_DEVICE
@@ -1365,8 +1430,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setLastChange')
     def setLastChange(self, value=None):
-        """
-        Set the changed datetime for this device.
+        """Set the changed datetime for this device.
 
         @param value: secs since the epoch, default is now
         @type value: float
@@ -1378,8 +1442,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setSnmpLastCollection')
     def setSnmpLastCollection(self, value=None):
-        """
-        Set the last time snmp collection occurred.
+        """Set the last time snmp collection occurred.
 
         @param value: secs since the epoch, default is now
         @type value: float
@@ -1392,9 +1455,8 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
     security.declareProtected(ZEN_CHANGE_DEVICE, 'addManufacturer')
     def addManufacturer(self, newHWManufacturerName=None,
                         newSWManufacturerName=None, REQUEST=None):
-        """
-        DEPRECATED -
-        Add either a hardware or software manufacturer to the database.
+        """Add either a hardware or software manufacturer to the database.
+        DEPRECATED
 
         @permission: ZEN_CHANGE_DEVICE
         @todo: Doesn't really do work on a device object.
@@ -1416,11 +1478,9 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             return self.callZenScreen(REQUEST)
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setHWProduct')
-    def setHWProduct(self, newHWProductName=None, hwManufacturer=None,
-                        REQUEST=None):
-        """
-        DEPRECATED -
-        Adds a new hardware product
+    def setHWProduct(self, newHWProductName=None, hwManufacturer=None, REQUEST=None):
+        """Adds a new hardware product.
+        DEPRECATED
 
         @permission: ZEN_CHANGE_DEVICE
         @todo: Doesn't really do work on a device object.
@@ -1429,7 +1489,8 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         added = False
         if newHWProductName and hwManufacturer:
             self.getDmdRoot("Manufacturers").createHardwareProduct(
-                                        newHWProductName, hwManufacturer)
+                newHWProductName, hwManufacturer,
+            )
             added = True
         if REQUEST:
             if added:
@@ -1438,21 +1499,25 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
                     'Hardware product has been set to %s.' % newHWProductName
                 )
                 REQUEST['hwProductName'] = newHWProductName
-                audit('UI.Device.SetHWProduct', self, manufacturer=hwManufacturer,
-                      product=newHWProductName)
+                audit(
+                    'UI.Device.SetHWProduct',
+                    self,
+                    manufacturer=hwManufacturer,
+                    product=newHWProductName,
+                )
             else:
                 messaging.IMessageSender(self).sendToBrowser(
                     'Set Product Failed',
-                    'Hardware product could not be set to %s.'%newHWProductName,
-                    priority=messaging.WARNING
+                    'Hardware product could not be set to %s.'
+                    % newHWProductName,
+                    priority=messaging.WARNING,
                 )
             return self.callZenScreen(REQUEST)
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setOSProduct')
     def setOSProduct(self, newOSProductName=None, osManufacturer=None, REQUEST=None):
-        """
+        """Adds a new os product.
         DEPRECATED
-        Adds a new os product
 
         @permission: ZEN_CHANGE_DEVICE
         @todo: Doesn't really do work on a device object.
@@ -1460,7 +1525,8 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         """
         if newOSProductName:
             self.getDmdRoot("Manufacturers").createSoftwareProduct(
-                                        newOSProductName, osManufacturer, isOS=True)
+                newOSProductName, osManufacturer, isOS=True,
+            )
         if REQUEST:
             if newOSProductName:
                 messaging.IMessageSender(self).sendToBrowser(
@@ -1468,8 +1534,12 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
                     'OS product has been set to %s.' % newOSProductName
                 )
                 REQUEST['osProductName'] = newOSProductName
-                audit('UI.Device.SetOSProduct', self, manufacturer=osManufacturer,
-                      product=newOSProductName)
+                audit(
+                    'UI.Device.SetOSProduct',
+                    self,
+                    manufacturer=osManufacturer,
+                    product=newOSProductName,
+                )
             else:
                 messaging.IMessageSender(self).sendToBrowser(
                     'Set Product Failed',
@@ -1480,8 +1550,9 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setLocation')
     def setLocation(self, locationPath, REQUEST=None):
-        """
-        Set the location of a device. If the location is new it will be created.
+        """Set the location of a device.
+
+        If the location is new it will be created.
 
         @permission: ZEN_CHANGE_DEVICE
         """
@@ -1498,9 +1569,8 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'addLocation')
     def addLocation(self, newLocationPath, REQUEST=None):
-        """
+        """Add a new location and relate it to this device.
         DEPRECATED
-        Add a new location and relate it to this device
 
         @todo: Doesn't really do work on a device object.
         Already exists on ZDeviceLoader
@@ -1516,10 +1586,9 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             return self.callZenScreen(REQUEST)
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setPerformanceMonitor')
-    def setPerformanceMonitor(self, performanceMonitor,
-                            newPerformanceMonitor=None, REQUEST=None):
-        """
-        Set the performance monitor for this device.
+    def setPerformanceMonitor(self, performanceMonitor, newPerformanceMonitor=None, REQUEST=None):
+        """Set the performance monitor for this device.
+
         If newPerformanceMonitor is passed in create it
 
         @permission: ZEN_CHANGE_DEVICE
@@ -1529,34 +1598,45 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
         if self.getPerformanceServer() is not None:
             oldPerformanceMonitor = self.getPerformanceServer().getId()
-            self.getDmdRoot("Monitors").setPreviousCollectorForDevice(self.getId(), oldPerformanceMonitor)
+            self.getDmdRoot("Monitors").setPreviousCollectorForDevice(
+                self.getId(), oldPerformanceMonitor,
+            )
 
         collectorNotFound = False
         warning = None
         obj = self.getDmdRoot("Monitors").getPerformanceMonitor(
-                                                    performanceMonitor)
+            performanceMonitor,
+        )
         if obj.viewName() != performanceMonitor:
             collectorNotFound = True
-            warning = ('Collector {} is not found. Performance monitor has been set to {}.'.format(
-                performanceMonitor, obj.viewName()))
+            warning = (
+                "Collector {} is not found. "
+                "Performance monitor has been set to {}."
+            ).format(performanceMonitor, obj.viewName())
             log.warn(warning)
         self.addRelation("perfServer", obj)
         self.setLastChange()
         notify(IndexingEvent(self))
 
         if REQUEST:
-            message = 'Performance monitor has been set to {}.'.format(performanceMonitor)
+            message = (
+                'Performance monitor has been set to {}.'
+            ).format(performanceMonitor)
             if collectorNotFound:
                 message = warning
-            messaging.IMessageSender(self).sendToBrowser('Monitor Changed', message)
-            audit('UI.Device.SetPerformanceMonitor', self,
-                  performancemonitor=performanceMonitor)
+            messaging.IMessageSender(self).sendToBrowser(
+                'Monitor Changed', message,
+            )
+            audit(
+                'UI.Device.SetPerformanceMonitor',
+                self,
+                performancemonitor=performanceMonitor,
+            )
             return self.callZenScreen(REQUEST)
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setGroups')
     def setGroups(self, groupPaths):
-        """
-        Set the list of groups for this device based on a list of paths
+        """Set the list of groups for this device based on a list of paths.
 
         @permission: ZEN_CHANGE_DEVICE
         """
@@ -1566,9 +1646,8 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'addDeviceGroup')
     def addDeviceGroup(self, newDeviceGroupPath, REQUEST=None):
-        """
+        """Add a device group to the database and this device.
         DEPRECATED?
-        Add a device group to the database and this device
 
         @permission: ZEN_CHANGE_DEVICE
         @todo: Already exists on ZDeviceLoader
@@ -1585,8 +1664,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setSystems')
     def setSystems(self, systemPaths):
-        """
-        Set a list of systems to this device using their system paths
+        """Set a list of systems to this device using their system paths.
 
         @permission: ZEN_CHANGE_DEVICE
         """
@@ -1596,9 +1674,8 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'addSystem')
     def addSystem(self, newSystemPath, REQUEST=None):
-        """
+        """Add a systems to this device using its system path.
         DEPRECATED?
-        Add a systems to this device using its system path
 
         @permission: ZEN_CHANGE_DEVICE
         @todo: Already exists on ZDeviceLoader
@@ -1615,8 +1692,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'setTerminalServer')
     def setTerminalServer(self, termservername):
-        """
-        Set the terminal server of this device
+        """Set the terminal server of this device.
 
         @param termservername: device name of terminal server
         @permission: ZEN_CHANGE_DEVICE
@@ -1626,24 +1702,23 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             self.addRelation('termserver', termserver)
 
     def _setRelations(self, relName, objGetter, relPaths):
-        """
-        Set related objects to this device
+        """Set related objects to this device.
 
         @param relName: name of the relation to set
         @param objGetter: method to get the relation
         @param relPaths: list of relationship paths
         """
         if not isinstance(relPaths, (list, tuple)):
-            relPaths = [relPaths,]
+            relPaths = [relPaths]
         relPaths = filter(lambda x: x.strip(), relPaths)
         rel = getattr(self, relName, None)
         if not rel:
-            raise AttributeError( "Relation %s not found" % relName)
+            raise AttributeError("Relation %s not found" % relName)
         curRelIds = {}
         for value in rel.objectValuesAll():
             curRelIds[value.getOrganizerName()] = value
         for path in relPaths:
-            if not path in curRelIds:
+            if path not in curRelIds:
                 robj = objGetter(path)
                 self.addRelation(relName, robj)
             else:
@@ -1658,15 +1733,14 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         @return a list of the html links supplied by implementers
                 of the IExpandedLinkProvider subscriber interface
         """
-        providers = subscribers( [self], IExpandedLinkProvider )
+        providers = subscribers([self], IExpandedLinkProvider)
         expandedLinkList = []
         for provider in providers:
-            expandedLinkList.extend( provider.getExpandedLinks() )
+            expandedLinkList.extend(provider.getExpandedLinks())
         return expandedLinkList
 
     def getExpandedLinks(self):
-        """
-        Return the expanded zComment property
+        """Return the expanded zComment property.
 
         @rtype: HTML output
         """
@@ -1687,8 +1761,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'device')
     def device(self):
-        """
-        Support DeviceResultInt mixin class. Returns itself
+        """Support DeviceResultInt mixin class. Returns itself.
 
         @permission: ZEN_VIEW
         """
@@ -1699,8 +1772,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
     ####################################################################
 
     def pastSnmpMaxFailures(self):
-        """
-        Returns true if the device has more SNMP failures
+        """Returns true if the device has more SNMP failures
         than maxFailures on its status mon.
 
         @rtype: boolean
@@ -1711,40 +1783,33 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             return statusmon.maxFailures < self.getSnmpStatusNumber()
         return False
 
-    # FIXME: cleanup --force option #2660
-    security.declareProtected(ZEN_MANAGE_DEVICE_STATUS,
-        'getLastPollSnmpUpTime')
+    security.declareProtected(ZEN_MANAGE_DEVICE_STATUS, 'getLastPollSnmpUpTime')
     def getLastPollSnmpUpTime(self):
-        """
-        Get the value of the snmpUpTime status object
+        """Get the value of the snmpUpTime status object.
 
         @permission: ZEN_MANAGE_DEVICE_STATUS
         """
         return self._lastPollSnmpUpTime.getStatus()
 
-    # FIXME: cleanup --force option #2660
-    security.declareProtected(ZEN_MANAGE_DEVICE_STATUS,
-        'setLastPollSnmpUpTime')
+    security.declareProtected(ZEN_MANAGE_DEVICE_STATUS, 'setLastPollSnmpUpTime')
     def setLastPollSnmpUpTime(self, value):
-        """
-        Set the value of the snmpUpTime status object
+        """Set the value of the snmpUpTime status object.
 
         @permission: ZEN_MANAGE_DEVICE_STATUS
         """
         self._lastPollSnmpUpTime.setStatus(value)
 
     def snmpAgeCheck(self, hours):
-        """
-        Returns True if SNMP data was collected more than 24 hours ago
+        """Returns True if SNMP data was collected more than 24 hours ago.
         """
         lastcoll = self.getSnmpLastCollection()
-        hours = hours/24.0
-        if DateTime() > lastcoll + hours: return 1
+        hours = hours / 24.0
+        if DateTime() > lastcoll + hours:
+            return 1
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'applyProductContext')
     def applyProductContext(self):
-        """
-        Apply zProperties inherited from Product Contexts.
+        """Apply zProperties inherited from Product Contexts.
         """
         self._applyProdContext(self.hw.getProductContext())
         self._applyProdContext(self.os.getProductContext())
@@ -1752,8 +1817,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             self._applyProdContext(soft.getProductContext())
 
     def _applyProdContext(self, context):
-        """
-        Apply zProperties taken for the product context passed in.
+        """Apply zProperties taken for the product context passed in.
 
         @param context: list of tuples returned from
         getProductContext on a MEProduct.
@@ -1787,20 +1851,31 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         xmlrpc = isXmlRpc(REQUEST)
         perfConf = self.getPerformanceServer()
         if perfConf is None:
-            msg = "Device %s in unknown state -- remove and remodel" % self.titleOrId()
+            msg = (
+                "Device %s in unknown state -- remove and remodel"
+            ) % self.titleOrId()
             if write is not None:
                 write(msg)
             log.error("Unable to get collector info: %s", msg)
-            if xmlrpc: return 1
+            if xmlrpc:
+                return 1
             return
 
-        perfConf.collectDevice(self, setlog, REQUEST, generateEvents,
-                               background, write, collectPlugins='',
-                               debug=debug)
+        perfConf.collectDevice(
+            self,
+            setlog,
+            REQUEST,
+            generateEvents,
+            background,
+            write,
+            collectPlugins='',
+            debug=debug,
+        )
 
         if REQUEST:
             audit('UI.Device.Remodel', self)
-        if xmlrpc: return 0
+        if xmlrpc:
+            return 0
 
     security.declareProtected(ZEN_MANAGE_DEVICE, 'collectDevice')
     def runDeviceMonitor(self, REQUEST=None, write=None, debug=False):
@@ -1818,28 +1893,30 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         xmlrpc = isXmlRpc(REQUEST)
         perfConf = self.getPerformanceServer()
         if perfConf is None:
-            msg = "Device %s in unknown state -- remove and remodel" % self.titleOrId()
+            msg = (
+                "Device %s in unknown state -- remove and remodel"
+            ) % self.titleOrId()
             if write is not None:
                 write(msg)
             log.error("Unable to get collector info: %s", msg)
-            if xmlrpc: return 1
+            if xmlrpc:
+                return 1
             return
 
         # Getting all the datasources from template signed to that
         # device for determining which daemon to run
-        templates = self.getRRDTemplates()
-        datasources = itertools.chain.from_iterable([
-                          template.getRRDDataSources() for
-                          template in templates
-        ])
+        datasources = itertools.chain.from_iterable(
+            template.getRRDDataSources()
+            for template in self.getRRDTemplates()
+        )
         ds_src_types = set()
         for datasource in datasources:
             # BasicDataSource contain the info about the source type
             if datasource.__class__.__name__ == 'BasicDataSource':
                 ds_src_types.add(datasource.sourcetype)
             else:
-            # We need parent class sourcetype since datasources inherited
-            # from PythonDatasource do not have "Python" as a sourcetype
+                # We need parent class sourcetype since datasources inherited
+                # from PythonDatasource do not have "Python" as a sourcetype
                 ds_src_types.add(datasource.__class__.__base__.sourcetype)
         for source in data_collector:
             if source in ds_src_types:
@@ -1847,19 +1924,24 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         # We support only core collection daemons
         # zenpython; zenperfsnmp; zencommand
         if not collection_daemons and write:
-            write('Modeling through UI only support COMMAND, '
-                'SNMP and ZenPython type of datasources')
-            if xmlrpc: return 1
+            write(
+                'Modeling through UI only support COMMAND, '
+                'SNMP and ZenPython type of datasources'
+            )
+            if xmlrpc:
+                return 1
             return
-        perfConf.runDeviceMonitor(self, REQUEST, write, collection_daemons, debug=debug)
+        perfConf.runDeviceMonitor(
+            self, REQUEST, write, collection_daemons, debug=debug,
+        )
         if REQUEST:
             audit('UI.Device.Remodel', self)
-        if xmlrpc: return 0
+        if xmlrpc:
+            return 0
 
     security.declareProtected(ZEN_MANAGE_DEVICE, 'collectDevice')
     def monitorPerDatasource(self, dsObj, REQUEST=None, write=None):
-        """
-        Run monitoring daemon against one device and one datasource ones
+        """Run monitoring daemon against one device and one datasource ones.
         """
         parameter = '--datasource'
         value = '%s/%s' % (dsObj.rrdTemplate.obj.id, dsObj.id)
@@ -1877,13 +1959,15 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         if not collection_daemon and write:
             write('Modeling through UI only support COMMAND, '
                   'SNMP and ZenPython type of datasources')
-            if xmlrpc: return 1
+            if xmlrpc:
+                return 1
             return
 
-        perfConf.runDeviceMonitorPerDatasource(self, REQUEST, write,
-                                               collection_daemon, parameter,
-                                               value)
-        if xmlrpc: return 0
+        perfConf.runDeviceMonitorPerDatasource(
+            self, REQUEST, write, collection_daemon, parameter, value,
+        )
+        if xmlrpc:
+            return 0
 
     security.declareProtected(ZEN_DELETE_DEVICE, 'deleteDevice')
     def deleteDevice(self, deleteStatus=False, deleteHistory=False,
@@ -1904,28 +1988,33 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         if deleteStatus:
             # Close events for this device
             zep = getFacade('zep')
-            tagFilter = { 'tag_uuids': [IGlobalIdentifier(self).getGUID()] }
-            eventFilter = { 'tag_filter': [ tagFilter ] }
+            tagFilter = {'tag_uuids': [IGlobalIdentifier(self).getGUID()]}
+            eventFilter = {'tag_filter': [tagFilter]}
             log.debug("Closing events for device: %s", self.getId())
             zep.closeEventSummaries(eventFilter=eventFilter)
         if REQUEST:
             audit('UI.Device.Delete', self, deleteStatus=deleteStatus,
                   deleteHistory=deleteHistory, deletePerf=deletePerf)
-        self.getDmdRoot("Monitors").deletePreviousCollectorForDevice(self.getId())
-        self.dmd.getDmdRoot("ZenLinkManager").remove_device_from_cache(self.getId())
+        self.getDmdRoot("Monitors").deletePreviousCollectorForDevice(
+            self.getId(),
+        )
+        self.dmd.getDmdRoot("ZenLinkManager").remove_device_from_cache(
+            self.getId(),
+        )
         parent._delObject(self.getId())
         if REQUEST:
-            if parent.getId()=='devices':
+            if parent.getId() == 'devices':
                 parent = parent.getPrimaryParent()
-            REQUEST['RESPONSE'].redirect(parent.absolute_url_path() +
-                                            "/deviceOrganizerStatus"
-                                            '?message=Device deleted')
+            REQUEST['RESPONSE'].redirect(
+                parent.absolute_url_path() +
+                "/deviceOrganizerStatus?message=Device deleted"
+            )
 
     security.declareProtected(ZEN_ADMIN_DEVICE, 'renameDevice')
     def renameDevice(self, newId=None, REQUEST=None, retainGraphData=False):
-        """
-        Rename device from the DMD.  Disallow assignment of
-        an id that already exists in the system.
+        """Rename device from the DMD.
+
+        Disallow assignment of an id that already exists in the system.
         Block renaming for this Device if a rename is already in progress.
 
         @permission: ZEN_ADMIN_DEVICE
@@ -1943,6 +2032,11 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         parent = self.getPrimaryParent()
         path = self.absolute_url_path()
         oldId = self.getId()
+
+        if self.renameInProgress:
+            message = "Rename already in progress for device %s."
+            log.warn(message, self.id)
+            raise Exception(message % (self.id,))
 
         if newId is None:
             return path
@@ -1992,8 +2086,8 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             FacadeMethodJob,
             description=(
                 'Reassociating performance data for device {} with '
-                'new ID {}'.format(oldId, newId)
-            ),
+                'new ID {}'
+            ).format(oldId, newId),
             kwargs=dict(
                 facadefqdn='Products.Zuul.facades.metricfacade.MetricFacade',
                 method='renameDevice',
@@ -2004,51 +2098,48 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'index_object')
     def index_object(self, idxs=None, noips=False):
-        """
-        Override so ips get indexed on move.  DEPRECATED
+        """Override so ips get indexed on move.  DEPRECATED
         """
         pass
 
     security.declareProtected(ZEN_CHANGE_DEVICE, 'unindex_object')
     def unindex_object(self):
-        """
-        Override so ips get unindexed as well.  DEPRECATED
+        """Override so ips get unindexed as well.  DEPRECATED
         """
         pass
 
     def getUserCommandTargets(self):
-        """
-        Called by Commandable.doCommand() to ascertain objects on which
+        """Called by Commandable.doCommand() to ascertain objects on which
         a UserCommand should be executed.
         """
         return [self]
 
     def getUserCommandEnvironment(self):
-        """
-        Returns the tales environment used to evaluate the command
+        """Returns the tales environment used to evaluate the command.
         """
         environ = Commandable.getUserCommandEnvironment(self)
         context = self.primaryAq()
-        environ.update({'dev': context,  'device': context,})
+        environ.update({'dev': context, 'device': context})
         return environ
 
     def getUrlForUserCommands(self):
-        """
-        Returns a URL to redirect to after a command has executed
+        """Returns a URL to redirect to after a command has executed
         used by Commandable
         """
         return self.getPrimaryUrlPath() + '/deviceManagement'
 
     def getHTMLEventSummary(self, severity=4):
-        """
-        Returns HTML Event Summary of a device
+        """Returns HTML Event Summary of a device.
         """
         html = []
         html.append("<table width='100%' cellspacing='1' cellpadding='3'>")
         html.append("<tr>")
+
         def evsummarycell(ev):
-            if ev[1]-ev[2]>=0: klass = '%s empty thin' % ev[0]
-            else: klass = '%s thin' % ev[0]
+            if (ev[1] - ev[2]) >= 0:
+                klass = '%s empty thin' % ev[0]
+            else:
+                klass = '%s thin' % ev[0]
             h = '<th align="center" width="16%%" class="%s">%s/%s</th>' % (
                 klass, ev[1], ev[2])
             return h
@@ -2058,16 +2149,17 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return '\n'.join(html)
 
     def getDataForJSON(self, minSeverity=0):
+        """Returns data ready for serialization.
         """
-        Returns data ready for serialization
-        """
-        url, classurl = map(urlquote,
-                    (self.getDeviceUrl(), self.getDeviceClassPath()))
+        url, classurl = map(
+            urlquote, (self.getDeviceUrl(), self.getDeviceClassPath()),
+        )
         id = '<a class="tablevalues" href="%s">%s</a>' % (
-                            url, self.titleOrId())
+            url, self.titleOrId(),
+        )
         ip = self.getDeviceIp()
         if self.checkRemotePerm(ZEN_VIEW, self.deviceClass()):
-            path = '<a href="/zport/dmd/Devices%s">%s</a>' % (classurl,classurl)
+            path = '<a href="/zport/dmd/Devices{0}">{0}</a>'.format(classurl)
         else:
             path = classurl
         prod = self.getProdState()
@@ -2075,14 +2167,12 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return [id, ip, path, prod, evsum, self.id]
 
     def exportXmlHook(self, ofile, ignorerels):
-        """
-        Add export of our child objects.
+        """Add export of our child objects.
         """
         map(lambda o: o.exportXml(ofile, ignorerels), (self.hw, self.os))
 
     def zenPropertyOptions(self, propname):
-        """
-        Returns a list of possible options for a given zProperty
+        """Returns a list of possible options for a given zProperty.
         """
         if propname == 'zCollectorPlugins':
             from Products.DataCollector.Plugins import loadPlugins
@@ -2099,8 +2189,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_MANAGE_DEVICE, 'pushConfig')
     def pushConfig(self, REQUEST=None):
-        """
-        This will result in a push of all the devices to live collectors
+        """This will result in a push of all the devices to live collectors.
 
         @permission: ZEN_MANAGE_DEVICE
         """
@@ -2115,8 +2204,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_EDIT_LOCAL_TEMPLATES, 'bindTemplates')
     def bindTemplates(self, ids=(), REQUEST=None):
-        """
-        This will bind available templates to the zDeviceTemplates
+        """This will bind available templates to the zDeviceTemplates.
 
         @permission: ZEN_EDIT_LOCAL_TEMPLATES
         """
@@ -2127,8 +2215,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_EDIT_LOCAL_TEMPLATES, 'removeZDeviceTemplates')
     def removeZDeviceTemplates(self, REQUEST=None):
-        """
-        Deletes the local zProperty, zDeviceTemplates
+        """Deletes the local zProperty, zDeviceTemplates.
 
         @permission: ZEN_EDIT_LOCAL_TEMPLATES
         """
@@ -2140,12 +2227,12 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         try:
             return self.deleteZenProperty('zDeviceTemplates', REQUEST)
         except ZenPropertyDoesNotExist:
-            if REQUEST: return self.callZenScreen(REQUEST)
+            if REQUEST:
+                return self.callZenScreen(REQUEST)
 
     security.declareProtected(ZEN_EDIT_LOCAL_TEMPLATES, 'addLocalTemplate')
     def addLocalTemplate(self, id, REQUEST=None):
-        """
-        Create a local template on a device
+        """Create a local template on a device.
 
         @permission: ZEN_EDIT_LOCAL_TEMPLATES
         """
@@ -2162,19 +2249,23 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
             return self.callZenScreen(REQUEST)
 
     def getAvailableTemplates(self):
-        """
-        Returns all available templates for this device
+        """Returns all available templates for this device.
         """
         # All templates defined on this device are available
         templates = self.objectValues('RRDTemplate')
         # Any templates available to the class that aren't overridden locally
         # are also available
         device_template_ids = set(t.id for t in templates)
-        templates.extend(t for t in self.deviceClass().getRRDTemplates()
-                                            if t.id not in device_template_ids)
+        templates.extend(
+            t
+            for t in self.deviceClass().getRRDTemplates()
+            if t.id not in device_template_ids
+        )
 
         # filter before sorting
-        templates = filter(lambda t: isinstance(self, t.getTargetPythonClass()), templates)
+        templates = filter(
+            lambda t: isinstance(self, t.getTargetPythonClass()), templates,
+        )
         return sorted(templates, key=lambda x: x.id.lower())
 
     def getSnmpV3EngineId(self):
@@ -2185,12 +2276,11 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getLinks')
     def getLinks(self, OSI_layer='3'):
-        """
-        Returns all Links on this Device's interfaces
+        """Returns all Links on this Device's interfaces.
 
         @permission: ZEN_VIEW
         """
-        if OSI_layer=='3':
+        if OSI_layer == '3':
             from Products.ZenUtils.NetworkTree import getDeviceNetworkLinks
             for link in getDeviceNetworkLinks(self):
                 yield link
@@ -2201,10 +2291,10 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
 
     security.declareProtected(ZEN_VIEW, 'getXMLEdges')
     def getXMLEdges(self, depth=3, filter="/", start=()):
+        """Gets XML.
         """
-        Gets XML
-        """
-        if not start: start=self.id
+        if not start:
+            start = self.id
         edges = NetworkTree.get_edges(self, depth,
                                       withIcons=True, filter=filter)
         return edgesToXML(edges, start)
@@ -2212,8 +2302,7 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
     security.declareProtected(ZEN_VIEW, 'getPrettyLink')
     @unpublished
     def getPrettyLink(self, target=None, altHref=""):
-        """
-        Gets a link to this device, plus an icon
+        """Gets a link to this device, plus an icon.
 
         @rtype: HTML text
         @permission: ZEN_VIEW
@@ -2230,12 +2319,12 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         if not self.checkRemotePerm(ZEN_VIEW, self):
             return rendered
         else:
-            return "<a %s href='%s' class='prettylink'>%s</a>" % \
-                    ('target=' + target if target else '', href, rendered)
+            return "<a %s href='%s' class='prettylink'>%s</a>" % (
+                'target=' + target if target else '', href, rendered,
+            )
 
     def osProcessClassMatchData(self):
-        """
-        Get a list of dictionaries containing everything needed to match
+        """Get a list of dictionaries containing everything needed to match
         processes against the global list of process classes.
         """
         matchers = []
@@ -2247,13 +2336,11 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
                 'replacement': pc.replacement,
                 'primaryUrlPath': pc.getPrimaryUrlPath(),
                 'primaryDmdId': pc.getPrimaryDmdId(),
-                })
-
+            })
         return matchers
 
     def manageIpVersion(self):
-        """
-        Returns either 4 or 6 depending on the version
+        """Returns either 4 or 6 depending on the version
         of the manageIp ip adddress
         """
         from ipaddr import IPAddress
@@ -2267,41 +2354,36 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         return 4
 
     def snmpwalkPrefix(self):
-        """
-        This method gets the ip address prefix used for this device when running
-        snmpwalk.
+        """This method gets the ip address prefix used for this device when
+        running snmpwalk.
+
         @rtype:   string
         @return:  Prefix used for snmwalk for this device
         """
-        if self.manageIpVersion() == 6:
-            return "udp6:"
-        return ""
+        return "" if (self.manageIpVersion() != 6) else "udp6:"
 
     def pingCommand(self):
-        """
-        Used by the user commands this returns which ping command
+        """Used by the user commands this returns which ping command
         this device should use.
+
         @rtype: string
         @return "ping" or "ping6" depending on if the manageIp is ipv6 or not
         """
-        if self.manageIpVersion() == 6:
-            return "ping6"
-        return "ping"
+        return "ping" if (self.manageIpVersion() != 6) else "ping6"
 
     def tracerouteCommand(self):
-        """
-        Used by the user commands this returns which traceroute command
+        """Used by the user commands this returns which traceroute command
         this device should use.
+
         @rtype: string
-        @return "traceroute" or "traceroute6" depending on if the manageIp is ipv6 or not
+        @return "traceroute" or "traceroute6" depending on if the manageIp
+            is ipv6 or not.
         """
-        if self.manageIpVersion() == 6:
-            return "traceroute6"
-        return "traceroute"
+        return "traceroute" if (self.manageIpVersion() != 6) else "traceroute6"
 
     def getStatus(self, statusclass=None, **kwargs):
-        """
-        Return the status number for this device of class statClass.
+        """Return the status number for this device of class statClass.
+
         If statusclass not set, search by zStatusEventClass.
         """
         if not self.monitorDevice():
@@ -2315,10 +2397,15 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
                     tags=[self.getUUID()],
                     element_sub_identifier=[""],
                     severity=[SEVERITY_CRITICAL],
-                    status=[STATUS_NEW, STATUS_ACKNOWLEDGED, STATUS_SUPPRESSED],
-                    event_class=filter(None, [self.zStatusEventClass]))
+                    status=[
+                        STATUS_NEW, STATUS_ACKNOWLEDGED, STATUS_SUPPRESSED,
+                    ],
+                    event_class=filter(None, [self.zStatusEventClass]),
+                )
 
-                result = zep.getEventSummaries(0, filter=event_filter, limit=0)
+                result = zep.getEventSummaries(
+                    0, filter=event_filter, limit=0,
+                )
                 return int(result['total'])
             except Exception:
                 return None
@@ -2332,23 +2419,34 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
         if not self.zPingMonitorIgnore and self.getManageIp():
             # Override normal behavior - we only care if the manage IP is down
 
-            # need to add the ipinterface component id to search since we may be
-            # pinging interfaces and only care about status of the one that
+            # need to add the ipinterface component id to search since we may
+            # be pinging interfaces and only care about status of the one that
             # matches the manage ip.  This is potentially expensive
             element_sub_identifier = [""]
             ifaces = self.getDeviceComponents(type='IpInterface')
             for iface in ifaces:
-                if self.manageIp in [ip.partition("/")[0] for ip in iface.getIpAddresses()]:
+                conditions = (
+                    self.manageIp == ip.partition("/")[0]
+                    for ip in iface.getIpAddresses()
+                )
+                if any(conditions):
                     element_sub_identifier.append(iface.id)
                     break
 
             zep = getFacade('zep', self)
-            event_filter = zep.createEventFilter(tags=[self.getUUID()],
-                                                 severity=[SEVERITY_WARNING,SEVERITY_ERROR,SEVERITY_CRITICAL],
-                                                 status=[STATUS_NEW,STATUS_ACKNOWLEDGED, STATUS_SUPPRESSED],
-                                                 element_sub_identifier=element_sub_identifier,
-                                                 event_class=filter(None, [statusclass]),
-                                                 details={EventProxy.DEVICE_IP_ADDRESS_DETAIL_KEY: self.getManageIp()})
+            event_filter = zep.createEventFilter(
+                tags=[self.getUUID()],
+                severity=[
+                    SEVERITY_WARNING, SEVERITY_ERROR, SEVERITY_CRITICAL,
+                ],
+                status=[STATUS_NEW, STATUS_ACKNOWLEDGED, STATUS_SUPPRESSED],
+                element_sub_identifier=element_sub_identifier,
+                event_class=filter(None, [statusclass]),
+                details={
+                    EventProxy.DEVICE_IP_ADDRESS_DETAIL_KEY:
+                        self.getManageIp(),
+                },
+            )
             result = zep.getEventSummaries(0, filter=event_filter, limit=0)
             return int(result['total'])
         else:
@@ -2364,7 +2462,6 @@ class Device(ManagedEntity, Commandable, Lockable, MaintenanceWindowable,
     def getMacAddressCache(self):
         if self.macaddresses is None:
             self.macaddresses = OOSet()
-
         return self.macaddresses
 
     def getMacAddresses(self):
