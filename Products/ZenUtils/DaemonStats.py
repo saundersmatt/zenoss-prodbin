@@ -7,8 +7,12 @@
 #
 ##############################################################################
 
-
+import logging
 import time, os
+
+from twisted.python.failure import Failure
+
+log = logging.getLogger("zen.daemonstats")
 
 
 class DaemonStats(object):
@@ -101,7 +105,16 @@ class DaemonStats(object):
                 min=metric_min)
 
         if value is not None:
-            self._metric_writer.write_metric(name, value, timestamp, tags)
+            d = self._metric_writer.write_metric(name, value, timestamp, tags)
+            d.addErrback(_handle_error)
+
             # check for threshold breaches and send events when needed
             self._threshold_notifier.notify(
                 self._contextKey(), context_id, self.name+'_'+name, timestamp, value)
+
+
+def _handle_error(e):
+    if isinstance(e, Failure):
+        log.error("write_metric failed: (%s) %s", e.type.__name__, e.value)
+    else:
+        log.error("write_metric failed: %s", e)
