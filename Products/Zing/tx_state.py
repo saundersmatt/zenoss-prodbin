@@ -12,8 +12,10 @@ import transaction
 
 from itertools import chain
 
+from transaction.interfaces import ISavepointDataManager, IDataManagerSavepoint
 from zope.component import createObject, getUtility
 from zope.component.interfaces import ComponentLookupError
+from zope.interface import implementer
 
 from .interfaces import IZingConnectorProxy, IImpactRelationshipsFactProvider
 
@@ -95,47 +97,73 @@ class ZingTxStateManager(object):
         if not zing_tx_state:
             zing_tx_state = ZingTxState()
             setattr(current_tx, self.TX_DATA_FIELD_NAME, zing_tx_state)
-            current_tx.addAfterCommitHook(
-                self.process_facts, args=(zing_tx_state, context),
-            )
-            log.debug(
-                "ZingTxStateManager AfterCommitHook added. "
-                "State added to current transaction."
-            )
+            current_tx.join(ZingDataManager(context))
         return zing_tx_state
 
-    def _generate_facts(self, context, zing_connector, zing_tx_state):
-        fact_generators = []
-        if zing_tx_state.is_there_datamap_updates():
-            # process datamaps
-            datamap_handler = createObject("ZingDatamapHandler", context)
-            fact_generators.append(
-                datamap_handler.generate_facts(zing_tx_state)
-            )
-        if zing_tx_state.is_there_object_updates():
-            # process object updates
-            object_updates_handler = createObject(
-                "ZingObjectUpdateHandler", context
-            )
-            fact_generators.append(
-                object_updates_handler.generate_facts(zing_tx_state)
-            )
-        return fact_generators
 
-    def process_facts(self, tx_success, zing_tx_state, context):
-        # This method is an addAfterCommitHook and is automatically called
-        # by the transaction manager.
-        if not tx_success:
-            return
+def _generate_facts(context, zing_connector, zing_tx_state):
+    fact_generators = []
+    if zing_tx_state.is_there_datamap_updates():
+        # process datamaps
+        datamap_handler = createObject("ZingDatamapHandler", context)
+        fact_generators.append(
+            datamap_handler.generate_facts(zing_tx_state)
+        )
+    if zing_tx_state.is_there_object_updates():
+        # process object updates
+        object_updates_handler = createObject(
+            "ZingObjectUpdateHandler", context
+        )
+        fact_generators.append(
+            object_updates_handler.generate_facts(zing_tx_state)
+        )
+    return fact_generators
+
+
+@implementer(IDataManagerSavepoint)
+class ZingSavepoint(object):
+    """Do-nothing savepoint implementation."""
+
+    def rollback(self):
+        pass
+
+
+@implementer(ISavepointDataManager)
+class ZingDataManager(object):
+    """Simple wrapper."""
+
+    def __init__(self, ctx):
+        self.__ctx = ctx
+        self.__key = "zing_dm_%x" % id(self)
+
+    def abort(self, tx):
+        pass
+
+    def tpc_begin(self, tx):
+        pass
+
+    def commit(self, tx):
+        pass
+
+    def tpc_vote(self, tx):
+        pass
+
+    def tpc_finish(self, tx):
         try:
-            zing_connector = IZingConnectorProxy(context)
+            zing_tx_state = getattr(
+                tx, ZingTxStateManager.TX_DATA_FIELD_NAME, None,
+            )
+            if zing_tx_state is None:
+                log.warning("No transaction state found")
+                return
+            zing_connector = IZingConnectorProxy(self.__ctx)
             if not zing_connector.ping():
                 log.error(
-                    "Error processing facts: zing-connector cant be reached"
+                    "Error processing facts: zing-connector did not respond"
                 )
                 return
-            fact_generators = self._generate_facts(
-                context, zing_connector, zing_tx_state
+            fact_generators = _generate_facts(
+                self.__ctx, zing_connector, zing_tx_state
             )
             if fact_generators:
                 zing_connector.send_fact_generator_in_batches(
@@ -143,3 +171,12 @@ class ZingTxStateManager(object):
                 )
         except Exception:
             log.exception("Exception processing facts for zing-connector")
+
+    def tpc_abort(self, tx):
+        pass
+
+    def sortKey(self):
+        return self.__key
+
+    def savepoint(self):
+        return ZingSavepoint()
