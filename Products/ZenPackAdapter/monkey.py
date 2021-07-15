@@ -22,7 +22,7 @@ from Products.ZenUtils.Utils import monkeypatch
 from Products.ZenHub.PBDaemon import PBDaemon
 from Products.ZenUtils.CmdBase import CmdBase
 from Products.ZenPackAdapter.cloudpublisher import CloudMetricPublisher
-
+from Products.DataCollector.ProcessCommandPlugin import ProcessCommandPlugin
 import zenwrapt
 zenwrapt.initialize()
 LOG = logging.getLogger("zen.monkeypatches")
@@ -109,4 +109,29 @@ def pushEventsLoop(self):
         reactor.callLater(0, zpa_EventLoop, self)
     except Exception as outer:
         LOG.error("Error calling zpa event loop: %s", outer)
+
+@monkeypatch(ProcessCommandPlugin)
+def process(self, device, results, log):
+    log.info('Monkey processing %s for device %s', self.name(), device.id)
+    log.info('device type: %s\ndir: %s', str(type(device)), str(dir(device)))
+    if not results:
+        log.error("Unable to get data for %s -- skipping model",
+                  device.id)
+        return None
+    results = unicode(results, errors="replace")  # without relying on "ps" command output
+    psOutputLines = self._filterLines(results.splitlines())
+
+    cmds = map(lambda s: s.strip(), psOutputLines)
+    cmds = filter(lambda(s): s, cmds)
+    rm = self.relMap()
+
+
+    def osProcessClassMatchData(self):
+        # TODO; update with matchers
+        matchers = []
+        return matchers
+
+    matchData = osProcessClassMatchData
+    rm.extend(map(self.objectMap, buildObjectMapData(matchData, cmds)))
+    return rm
 
