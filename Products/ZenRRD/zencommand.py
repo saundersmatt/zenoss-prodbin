@@ -504,12 +504,13 @@ class SshPerformanceCollectionTask(BaseTask):
 
         except Exception as e:
             self.state = TaskStates.STATE_PAUSED
+            message = "[{}] {}".format(type(e).__name__, e)
             err_msg = (
                 "Task paused  device=%s ip=%s interval=%s message=%s" % (
                     self._devId,
                     self._manageIp,
                     self.interval,
-                    e.message,
+                    message,
                 )
             )
             if log.isEnabledFor(logging.DEBUG):
@@ -519,7 +520,7 @@ class SshPerformanceCollectionTask(BaseTask):
             self._eventService.sendEvent(
                 STATUS_EVENT,
                 device=self._devId,
-                summary=e.message,
+                summary="Error running task {}".format(message),
                 component=COLLECTOR_NAME,
                 severity=Error,
             )
